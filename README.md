@@ -52,3 +52,4 @@ To install dependencies and run your Google Cloud Vertex AI Studio App locally, 
 ```bash
 npm install && npm run dev
 # finsight
+# finsight
