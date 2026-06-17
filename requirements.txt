@@ -1,24 +1,8 @@
-### ------------------------------------ ###
-### Backend dependencies
-### ------------------------------------ ###
 requests
 beautifulsoup4
 lxml
-FastAPI
+fastapi
 uvicorn
+httpx
 pytest
 pytest-cov
-httpx
-
-### ------------------------------------ ###
-### Frontend dependencies
-### ------------------------------------ ###
-react
-react-dom
-react-scripts
-express
-cors
-
-### ------------------------------------ ###
-### Frontend dependencies
-### ------------------------------------ ###

@@ -5,10 +5,11 @@ This is the low-level I/O layer. Everything here talks to sec.gov; no module
 above this one should call ``requests`` directly.
 """
 
-import re
-
-import requests
 from bs4 import BeautifulSoup
+
+import re
+import requests
+
 
 # SEC requires a descriptive User-Agent or you'll get 403s
 # Replace with your name and UW email
@@ -103,16 +104,26 @@ def get_filings(cik: str, form_type: str = "10-K", limit: int = 5) -> list:
 
 def get_document_url(cik: str, accession: str, primary_doc: str) -> str:
     """Build the full URL to the filing document on SEC EDGAR."""
-    accession_clean = accession.replace("-", "")
-    cik_int = int(cik)
-    return f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{primary_doc}"
+    try:
+        accession_clean = accession.replace("-", "")
+        cik_int = int(cik)
+        return f"https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_clean}/{primary_doc}"
+    
+    except Exception as e:
+        print(f"Error constructing document URL for CIK {cik}, accession {accession}: {e}")
+        raise
 
 
 def fetch_and_parse(url: str) -> str:
     """Fetch an SEC filing HTML page and return clean plain text."""
-    r = requests.get(url, headers={**SEC_HEADERS, "Host": "www.sec.gov"})
-    r.raise_for_status()
-    soup = BeautifulSoup(r.content, "lxml")
+    try:
+        r = requests.get(url, headers={**SEC_HEADERS, "Host": "www.sec.gov"})
+        r.raise_for_status()
+        soup = BeautifulSoup(r.content, "lxml")
+    
+    except Exception as e:
+        print(f"Error fetching document for URL {url}: {e}")
+        raise
 
     # Remove noise tags
     for tag in soup(["script", "style", "meta", "noscript", "img", "head"]):

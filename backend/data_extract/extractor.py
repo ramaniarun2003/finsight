@@ -1,40 +1,38 @@
 """
 Main extraction pipeline.
 
-Orchestrates the SEC client and the extraction modules into a single
-``run(ticker)`` call that turns a ticker symbol into structured JSON.
+Numbers come from SEC's XBRL companyfacts API (standardized, works for any
+filer); narrative sections come from the filing document.
 
 Run from the repo root:
-    python -m backend.data_extract.extractor AAPL 10-K
+    python -m backend.data_extract.extractor
 or import ``run`` from the FastAPI app (see app.py).
 """
 
 import json
 
-from .sec_client import get_cik, get_filings, get_document_url, fetch_and_parse
+from .sec_client import (get_cik, get_filings, get_document_url,
+                         fetch_and_parse, get_company_facts)
 from .sections import extract_sections
-from .text_metrics import (
-    extract_income_statement,
-    extract_balance_sheet,
-    extract_cash_flow,
-    extract_qualitative,
-)
+from . import facts as xbrl
 from .ratios import compute_ratios
+from .text_metrics import extract_qualitative
 
 
-# ─── MAIN PIPELINE ──────────────────────────────────────────────────────────
-
-def extract_all_metrics(sections: dict) -> dict:
-    """Run all extraction layers and return unified metrics dict."""
+def extract_all_metrics(company_facts: dict, sections: dict) -> dict:
+    """Standardized numbers from XBRL + qualitative signals from the narrative."""
     try:
-        financial_text = sections.get("financial_statements", "") + sections.get("mda", "")
-
-        income    = extract_income_statement(financial_text)
-        balance   = extract_balance_sheet(financial_text)
-        cash_flow = extract_cash_flow(financial_text)
+        income    = xbrl.extract_income_statement(company_facts)
+        balance   = xbrl.extract_balance_sheet(company_facts)
+        cash_flow = xbrl.extract_cash_flow(company_facts)
         ratios    = compute_ratios(income, balance, cash_flow)
-        qualitative = extract_qualitative(sections)
-
+        # Qualitative parsing is heuristic; never let it sink a run whose
+        # numbers already succeeded.
+        try:
+            qualitative = extract_qualitative(sections)
+        except Exception as e:
+            print(f"  Warning: qualitative extraction failed; continuing without it: {e}")
+            qualitative = {}
         return {
             "income_statement": income,
             "balance_sheet": balance,
@@ -42,38 +40,35 @@ def extract_all_metrics(sections: dict) -> dict:
             "computed_ratios": ratios,
             "qualitative": qualitative,
         }
-
     except Exception as e:
         print(f"Error extracting all metrics: {e}")
         raise
 
 
 def run(ticker: str, form_type: str = "10-K") -> dict:
-    """Full pipeline: ticker symbol → structured JSON."""
+    """Full pipeline: ticker symbol -> structured JSON."""
     try:
-        print(f"\n[1/4] Looking up CIK for {ticker}...")
+        print(f"\n[1/5] Looking up CIK for {ticker}...")
         cik = get_cik(ticker)
-        print(f"      CIK: {cik}")
 
-        print(f"[2/4] Fetching {form_type} filings...")
+        print(f"[2/5] Fetching {form_type} filings...")
         filings = get_filings(cik, form_type=form_type, limit=1)
-
         if not filings:
             raise ValueError(f"No {form_type} filings found for {ticker}")
-
         filing = filings[0]
-        print(f"      Most recent: {filing['date']}")
 
-        print(f"[3/4] Fetching and parsing document...")
+        print(f"[3/5] Fetching and parsing document (narrative)...")
         url = get_document_url(cik, filing["accession"], filing["primary_document"])
-        print(f"      URL: {url}")
         text = fetch_and_parse(url)
-
-        print(f"[4/4] Extracting sections and metrics...")
         sections = extract_sections(text)
-        metrics  = extract_all_metrics(sections)
 
-        result = {
+        print(f"[4/5] Fetching XBRL company facts (numbers)...")
+        company_facts = get_company_facts(cik)
+
+        print(f"[5/5] Building metrics...")
+        metrics = extract_all_metrics(company_facts, sections)
+
+        return {
             "ticker": ticker.upper(),
             "form": form_type,
             "filing_date": filing["date"],
@@ -83,9 +78,7 @@ def run(ticker: str, form_type: str = "10-K") -> dict:
             "metrics": metrics,
             "sections": sections,
         }
-
-        return result
-
+        
     except Exception as e:
         print(f"Error in run pipeline for {ticker} {form_type}: {e}")
         raise
@@ -94,8 +87,12 @@ def run(ticker: str, form_type: str = "10-K") -> dict:
 if __name__ == "__main__":
     import sys
 
-    ticker = sys.argv[1] if len(sys.argv) > 1 else "AAPL"
-    form   = sys.argv[2] if len(sys.argv) > 2 else "10-K"
+    ticker = sys.argv[1] if len(sys.argv) > 1 else None     # Required argument
+    form   = sys.argv[2] if len(sys.argv) > 2 else "10-K"   # Optional, defaults to 10-K
+
+    if not ticker:
+        print("Error: Ticker symbol is required.")
+        sys.exit(1)
 
     data = run(ticker, form)
 
@@ -103,7 +100,7 @@ if __name__ == "__main__":
     with open(output_file, "w") as f:
         json.dump(data, f, indent=2)
 
-    print(f"\nSaved → {output_file}")
+    print(f"\nSaved -> {output_file}")
     print(f"Sections found:  {list(data['sections'].keys())}")
     print(f"\nMetrics summary:")
     for category, values in data["metrics"].items():

@@ -12,13 +12,15 @@ import re
 # ─── HELPERS ────────────────────────────────────────────────────────────────
 
 def _parse_number(raw: str) -> float | None:
-    """Convert a string like '416,161' or '7.46' to a float."""
+    """Convert a string like '416,161' or '7.46' to a float.
+
+    Returns None for anything that isn't a clean number (empty string, a stray
+    comma, None, etc.) so a single junk token can't crash the whole pipeline.
+    """
     try:
         return float(raw.replace(",", "").strip())
-
-    except Exception as e:
-        print(f"Error parsing number from '{raw}': {e}")
-        raise
+    except (ValueError, TypeError, AttributeError):
+        return None
 
 
 def _search(pattern: str, text: str, flags=re.IGNORECASE) -> str | None:
@@ -177,17 +179,23 @@ def extract_qualitative(sections: dict) -> dict:
         macro_mentioned = [kw for kw in macro_keywords if kw.lower() in (mda + risks).lower()]
         out["macro_risks_mentioned"] = macro_mentioned
 
-        # Segment breakdown — capture lines with segment names and dollar amounts
-        segment_pattern = r"(Americas|Europe|Greater China|Japan|Rest of Asia Pacific|North America|International)\s*\$?\s*([\d,]+)"
+        # Segment breakdown — segment name + dollar amount. The amount must start
+        # with a digit so a stray comma/blank can't match, and unparseable values
+        # are dropped rather than stored.
+        segment_pattern = r"(Americas|Europe|Greater China|Japan|Rest of Asia Pacific|North America|International)\s*\$?\s*(\d[\d,]*)"
         segments = re.findall(segment_pattern, mda, re.IGNORECASE)
-        if segments:
-            out["segment_revenue"] = {seg: _parse_number(val) for seg, val in segments[:10]}
+        seg_rev = {seg: _parse_number(val) for seg, val in segments[:10]}
+        seg_rev = {k: v for k, v in seg_rev.items() if v is not None}
+        if seg_rev:
+            out["segment_revenue"] = seg_rev
 
-        # Product revenue breakdown
-        product_pattern = r"(iPhone|Mac|iPad|Wearables|Services|Windows|Cloud|Azure|Advertising|Search)\s*\$?\s*([\d,]+)"
+        # Product revenue breakdown (amount must start with a digit)
+        product_pattern = r"(iPhone|Mac|iPad|Wearables|Services|Windows|Cloud|Azure|Advertising|Search)\s*\$?\s*(\d[\d,]*)"
         products = re.findall(product_pattern, mda, re.IGNORECASE)
-        if products:
-            out["product_revenue"] = {prod: _parse_number(val) for prod, val in products[:10]}
+        prod_rev = {prod: _parse_number(val) for prod, val in products[:10]}
+        prod_rev = {k: v for k, v in prod_rev.items() if v is not None}
+        if prod_rev:
+            out["product_revenue"] = prod_rev
 
         # Key risk themes from risk factors
         risk_themes = []
@@ -211,7 +219,9 @@ def extract_qualitative(sections: dict) -> dict:
         # Employee count
         emp_match = re.search(r"([\d,]+)\s+full.time\s+equivalent\s+employees", business, re.IGNORECASE)
         if emp_match:
-            out["full_time_employees"] = _parse_number(emp_match.group(1))
+            emp = _parse_number(emp_match.group(1))
+            if emp is not None:
+                out["full_time_employees"] = emp
 
         # Fiscal year end
         fy_match = re.search(r"fiscal\s+year(?:\s+ended)?\s+(September|December|June|March|January)\s*[\d,]+,?\s*(\d{4})", mda, re.IGNORECASE)

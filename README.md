@@ -29,7 +29,7 @@ To run this application locally, you need:
 The project is organized into two main directories:
 
 *   `frontend/`: Contains the Frontend application code.
-*   `backend/`: Contains the Node.js/Express server code to proxy Google Cloud API calls.
+*   `backend/`: Contains the Node.js/Express server code to proxy Google Cloud API calls and python for the AI integration.
 
 ## Backend Environment Variables
 

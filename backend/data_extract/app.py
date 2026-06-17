@@ -8,7 +8,7 @@ the model then analyzes.
 Run from the repo root:
     uvicorn backend.data_extract.app:app --reload --port 8000
 Then call:
-    GET http://localhost:8000/extract/AAPL
+    GET http://localhost:8000/extract/
 """
 
 from fastapi import FastAPI, HTTPException
