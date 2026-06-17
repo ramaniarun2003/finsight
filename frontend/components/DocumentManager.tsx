@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, Trash2, File, CheckCircle } from 'lucide-react';
+import { UploadCloud, FileText, Trash2, CheckCircle, Loader2 } from 'lucide-react';
 import { Document } from '../types';
 
 interface DocumentManagerProps {
@@ -8,32 +8,24 @@ interface DocumentManagerProps {
   onRemoveDocument: (id: string) => void;
 }
 
+const FF = "'Inter', system-ui, sans-serif";
+
 const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument }) => {
-  const [isDragging, setIsDragging] = useState(false);
+  const [isDragging, setIsDragging]   = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [ticker, setTicker]           = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
 
   const simulateUpload = (file: File) => {
     setIsUploading(true);
-    // Simulate network delay and text extraction
     setTimeout(() => {
-      const newDoc: Document = {
+      onAddDocument({
         id: `doc-${Date.now()}`,
         name: file.name,
         uploadDate: new Date().toISOString().split('T')[0],
         size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-        content: `Simulated extracted content for ${file.name}. This document contains financial data, revenue figures, and strategic outlook for the upcoming quarters. (In a real app, this would be the parsed text from the PDF).`
-      };
-      onAddDocument(newDoc);
+        content: `Simulated extracted content for ${file.name}. This document contains financial data, revenue figures, and strategic outlook. (In a real app this would be parsed PDF text.)`,
+      });
       setIsUploading(false);
     }, 1500);
   };
@@ -41,98 +33,212 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      simulateUpload(e.dataTransfer.files[0]);
-    }
+    if (e.dataTransfer.files?.[0]) simulateUpload(e.dataTransfer.files[0]);
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      simulateUpload(e.target.files[0]);
-    }
+    if (e.target.files?.[0]) simulateUpload(e.target.files[0]);
+  };
+
+  const handleFetchEdgar = () => {
+    if (!ticker.trim()) return;
+    setIsUploading(true);
+    setTimeout(() => {
+      onAddDocument({
+        id: `doc-${Date.now()}`,
+        name: `${ticker.toUpperCase()}_10K_FY2024.pdf`,
+        uploadDate: new Date().toISOString().split('T')[0],
+        size: '2.4 MB',
+        content: `Simulated 10-K content for ${ticker.toUpperCase()} FY2024 fetched from SEC EDGAR.`,
+      });
+      setTicker('');
+      setIsUploading(false);
+    }, 1800);
   };
 
   return (
-    <div className="p-6 h-full overflow-y-auto">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Document Knowledge Base</h1>
-        <p className="text-slate-500">Upload financial reports, 10-Ks, and earnings transcripts for AI analysis.</p>
+    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: '#FFFFFF' }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 2px' }}>Document library</p>
+        <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Upload 10-Ks, 10-Qs, and earnings PDFs for RAG analysis.</p>
       </div>
 
-      {/* Upload Zone */}
-      <div 
-        className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors mb-8 ${
-          isDragging ? 'border-indigo-500 bg-indigo-50' : 'border-slate-300 bg-white hover:bg-slate-50'
-        }`}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
+      {/* Drop zone */}
+      <div
+        onClick={() => !isUploading && fileInputRef.current?.click()}
+        onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+        onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
+        style={{
+          border: `2px dashed ${isDragging ? '#4F46E5' : '#E5E7EB'}`,
+          borderRadius: 10,
+          padding: '28px 20px',
+          textAlign: 'center',
+          cursor: isUploading ? 'default' : 'pointer',
+          background: isDragging ? '#EEF2FF' : '#FAFAFA',
+          marginBottom: 16,
+          transition: 'border-color 0.15s, background 0.15s',
+        }}
+        onMouseEnter={e => { if (!isUploading && !isDragging) (e.currentTarget as HTMLDivElement).style.background = '#F8F7F4'; }}
+        onMouseLeave={e => { if (!isDragging) (e.currentTarget as HTMLDivElement).style.background = isUploading ? '#FAFAFA' : '#FAFAFA'; }}
       >
-        <input 
-          type="file" 
-          ref={fileInputRef} 
-          onChange={handleFileInput} 
-          className="hidden" 
-          accept=".pdf,.txt,.csv"
-        />
-        
+        <input type="file" ref={fileInputRef} onChange={handleFileInput} style={{ display: 'none' }} accept=".pdf,.txt,.csv" />
         {isUploading ? (
-          <div className="flex flex-col items-center justify-center space-y-4">
-            <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-            <p className="text-slate-600 font-medium">Processing document and generating embeddings...</p>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <Loader2 size={26} color="#4F46E5" style={{ animation: 'spin 1s linear infinite' }} />
+            <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Processing document and generating embeddings…</p>
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center space-y-4 cursor-pointer" onClick={() => fileInputRef.current?.click()}>
-            <div className="p-4 bg-indigo-100 text-indigo-600 rounded-full">
-              <UploadCloud size={32} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <UploadCloud size={22} color="#4F46E5" />
             </div>
             <div>
-              <p className="text-lg font-medium text-slate-700">Click to upload or drag and drop</p>
-              <p className="text-sm text-slate-500 mt-1">PDF, TXT, or CSV (Max 10MB)</p>
+              <p style={{ fontSize: 14, fontWeight: 500, color: '#374151', margin: '0 0 3px' }}>Click to upload or drag and drop</p>
+              <p style={{ fontSize: 12, color: '#9CA3AF', margin: 0 }}>PDF, TXT, or CSV · max 10MB</p>
             </div>
           </div>
         )}
       </div>
 
-      {/* Document List */}
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
-          <h2 className="font-semibold text-slate-800">Indexed Documents ({documents.length})</h2>
-        </div>
-        <ul className="divide-y divide-slate-200">
-          {documents.length === 0 ? (
-            <li className="p-8 text-center text-slate-500">No documents uploaded yet.</li>
-          ) : (
-            documents.map((doc) => (
-              <li key={doc.id} className="p-4 hover:bg-slate-50 flex items-center justify-between group transition-colors">
-                <div className="flex items-center space-x-4">
-                  <div className="p-2 bg-rose-100 text-rose-600 rounded-lg">
-                    <FileText size={24} />
-                  </div>
-                  <div>
-                    <p className="font-medium text-slate-900">{doc.name}</p>
-                    <div className="flex items-center text-xs text-slate-500 mt-1 space-x-3">
-                      <span>{doc.size}</span>
-                      <span>•</span>
-                      <span>Uploaded {doc.uploadDate}</span>
-                      <span>•</span>
-                      <span className="flex items-center text-emerald-600"><CheckCircle size={12} className="mr-1"/> Indexed</span>
-                    </div>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => onRemoveDocument(doc.id)}
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md opacity-0 group-hover:opacity-100 transition-all"
-                  title="Remove document"
-                >
-                  <Trash2 size={18} />
-                </button>
-              </li>
-            ))
-          )}
-        </ul>
+      {/* EDGAR fetch row */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 24 }}>
+        <input
+          type="text"
+          value={ticker}
+          onChange={e => setTicker(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleFetchEdgar()}
+          placeholder="Fetch by ticker from SEC EDGAR (e.g. GPS, PVH, AEO)…"
+          style={{
+            flex: 1, fontSize: 13,
+            padding: '8px 12px',
+            border: '0.5px solid #E5E7EB',
+            borderRadius: 7, outline: 'none',
+            fontFamily: FF, color: '#111827',
+            background: '#FFFFFF',
+          }}
+          onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
+          onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+        />
+        <button
+          onClick={handleFetchEdgar}
+          disabled={!ticker.trim() || isUploading}
+          style={{
+            padding: '8px 16px', borderRadius: 7, fontSize: 13,
+            background: ticker.trim() && !isUploading ? '#3730A3' : '#E5E7EB',
+            color:      ticker.trim() && !isUploading ? '#EEF2FF'  : '#9CA3AF',
+            border: 'none', cursor: ticker.trim() && !isUploading ? 'pointer' : 'not-allowed',
+            fontFamily: FF, fontWeight: 500, flexShrink: 0,
+            transition: 'background 0.15s',
+          }}
+          onMouseEnter={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = '#312E81'; }}
+          onMouseLeave={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = '#3730A3'; }}
+        >
+          Fetch 10-K
+        </button>
       </div>
+
+      {/* Document list */}
+      <div style={{ border: '0.5px solid #E5E7EB', borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ padding: '11px 16px', borderBottom: '0.5px solid #E5E7EB', background: '#F8F7F4', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: '#374151', margin: 0 }}>
+            Indexed documents ({documents.length})
+          </p>
+        </div>
+
+        {documents.length === 0 ? (
+          <div style={{ padding: '32px 20px', textAlign: 'center' }}>
+            <FileText size={22} color="#D1D5DB" style={{ margin: '0 auto 8px', display: 'block' }} />
+            <p style={{ fontSize: 13, color: '#9CA3AF', margin: 0 }}>No filings yet — upload above or fetch from EDGAR.</p>
+          </div>
+        ) : (
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {documents.map((doc, i) => (
+              <DocRow
+                key={doc.id}
+                doc={doc}
+                last={i === documents.length - 1}
+                onRemove={() => onRemoveDocument(doc.id)}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
+  );
+};
+
+const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> = ({ doc, last, onRemove }) => {
+  const [hovered, setHovered] = useState(false);
+  const FF = "'Inter', system-ui, sans-serif";
+
+  const is10K = doc.name.toLowerCase().includes('10k') || doc.name.toLowerCase().includes('10-k') || doc.name.toLowerCase().includes('annual');
+  const tag = is10K ? '10-K' : '10-Q';
+  const tagStyle: React.CSSProperties = is10K
+    ? { background: '#EEF2FF', color: '#3730A3' }
+    : { background: '#ECFDF5', color: '#065F46' };
+
+  return (
+    <li
+      style={{
+        display: 'flex', alignItems: 'center', gap: 12,
+        padding: '11px 16px',
+        borderBottom: last ? 'none' : '0.5px solid #E5E7EB',
+        background: hovered ? '#FAFAFA' : '#FFFFFF',
+        transition: 'background 0.1s',
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      {/* Icon */}
+      <div style={{ width: 34, height: 34, borderRadius: 7, background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <FileText size={16} color="#DC2626" />
+      </div>
+
+      {/* Info */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {doc.name}
+        </p>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9CA3AF' }}>
+          <span>{doc.size}</span>
+          <span>·</span>
+          <span>Uploaded {doc.uploadDate}</span>
+          <span>·</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#059669' }}>
+            <CheckCircle size={11} />
+            Indexed
+          </span>
+        </div>
+      </div>
+
+      {/* Tag */}
+      <span style={{ ...tagStyle, fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 500, flexShrink: 0 }}>
+        {tag}
+      </span>
+
+      {/* Delete */}
+      <button
+        onClick={onRemove}
+        title="Remove"
+        style={{
+          width: 28, height: 28, borderRadius: 6,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          border: 'none', cursor: 'pointer', flexShrink: 0,
+          background: hovered ? '#FEF2F2' : 'transparent',
+          color: hovered ? '#DC2626' : '#D1D5DB',
+          opacity: hovered ? 1 : 0,
+          transition: 'opacity 0.15s, background 0.1s, color 0.1s',
+          fontFamily: FF,
+        }}
+      >
+        <Trash2 size={15} />
+      </button>
+    </li>
   );
 };
 

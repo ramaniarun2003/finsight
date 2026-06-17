@@ -7,231 +7,274 @@ interface AnalysisViewProps {
   documents: Document[];
 }
 
+const FF = "'Inter', system-ui, sans-serif";
+
+const btn = (active: boolean): React.CSSProperties => ({
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '7px 16px', borderRadius: 7, fontSize: 13,
+  fontWeight: active ? 500 : 400,
+  background: active ? '#FFFFFF' : 'transparent',
+  color:      active ? '#3730A3' : '#6B7280',
+  border:     active ? '0.5px solid #E5E7EB' : 'none',
+  cursor: 'pointer', fontFamily: FF,
+  transition: 'background 0.1s, color 0.1s',
+});
+
+const selectStyle: React.CSSProperties = {
+  width: '100%', fontSize: 13,
+  padding: '8px 12px',
+  border: '0.5px solid #E5E7EB',
+  borderRadius: 7, outline: 'none',
+  fontFamily: FF, color: '#111827',
+  background: '#FFFFFF', cursor: 'pointer',
+};
+
 const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
-  const [mode, setMode] = useState<'summary' | 'compare'>('summary');
-  
-  // Summary State
-  const [selectedDocForSummary, setSelectedDocForSummary] = useState<string>('');
-  const [summaryResult, setSummaryResult] = useState<string>('');
-  
-  // Compare State
-  const [doc1Id, setDoc1Id] = useState<string>('');
-  const [doc2Id, setDoc2Id] = useState<string>('');
-  const [compareResult, setCompareResult] = useState<string>('');
-  
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode]                           = useState<'summary' | 'compare'>('summary');
+  const [selectedDocForSummary, setSelectedDoc]   = useState('');
+  const [summaryResult, setSummaryResult]         = useState('');
+  const [doc1Id, setDoc1Id]                       = useState('');
+  const [doc2Id, setDoc2Id]                       = useState('');
+  const [compareResult, setCompareResult]         = useState('');
+  const [isLoading, setIsLoading]                 = useState(false);
+  const [error, setError]                         = useState<string | null>(null);
 
   const handleGenerateSummary = async () => {
     if (!selectedDocForSummary) return;
     const doc = documents.find(d => d.id === selectedDocForSummary);
     if (!doc) return;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await generateSummary(doc.content);
-      setSummaryResult(result);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
+    setIsLoading(true); setError(null);
+    try   { setSummaryResult(await generateSummary(doc.content)); }
+    catch (err: any) { setError(err.message); }
+    finally { setIsLoading(false); }
   };
 
   const handleCompare = async () => {
     if (!doc1Id || !doc2Id || doc1Id === doc2Id) {
-      setError("Please select two different documents to compare.");
-      return;
+      setError('Please select two different documents to compare.'); return;
     }
-    const doc1 = documents.find(d => d.id === doc1Id);
-    const doc2 = documents.find(d => d.id === doc2Id);
-    if (!doc1 || !doc2) return;
-
-    setIsLoading(true);
-    setError(null);
-    try {
-      const result = await compareDocuments(doc1.name, doc1.content, doc2.name, doc2.content);
-      setCompareResult(result);
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
+    const d1 = documents.find(d => d.id === doc1Id);
+    const d2 = documents.find(d => d.id === doc2Id);
+    if (!d1 || !d2) return;
+    setIsLoading(true); setError(null);
+    try   { setCompareResult(await compareDocuments(d1.name, d1.content, d2.name, d2.content)); }
+    catch (err: any) { setError(err.message); }
+    finally { setIsLoading(false); }
   };
 
   const handleExport = (content: string, filename: string) => {
-    const blob = new Blob([content], { type: 'text/markdown' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url;
+    a.href = URL.createObjectURL(new Blob([content], { type: 'text/markdown' }));
     a.download = `${filename}.md`;
-    document.body.appendChild(a);
-    a.click();
+    document.body.appendChild(a); a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
   };
 
-  // Simple markdown renderer for the results
   const renderMarkdown = (text: string) => {
     if (!text) return null;
-    const lines = text.split('\n');
-    return lines.map((line, i) => {
-      if (line.startsWith('## ')) return <h2 key={i} className="text-xl font-bold mt-6 mb-3 text-slate-800">{line.replace('## ', '')}</h2>;
-      if (line.startsWith('# ')) return <h1 key={i} className="text-2xl font-bold mt-6 mb-4 text-slate-900">{line.replace('# ', '')}</h1>;
-      if (line.startsWith('- **') || line.startsWith('* **')) {
-        const parts = line.split('**');
-        return <li key={i} className="ml-4 mb-2 text-slate-700"><span className="font-bold">{parts[1]}</span>{parts.slice(2).join('**')}</li>;
-      }
-      if (line.startsWith('- ') || line.startsWith('* ')) return <li key={i} className="ml-4 mb-2 text-slate-700">{line.substring(2)}</li>;
+    return text.split('\n').map((line, i) => {
+      if (line.startsWith('## '))
+        return <h2 key={i} style={{ fontSize: 16, fontWeight: 500, color: '#111827', margin: '20px 0 8px' }}>{line.slice(3)}</h2>;
+      if (line.startsWith('# '))
+        return <h1 key={i} style={{ fontSize: 18, fontWeight: 500, color: '#111827', margin: '20px 0 10px' }}>{line.slice(2)}</h1>;
+      if (line.startsWith('- ') || line.startsWith('* '))
+        return <li key={i} style={{ marginLeft: 16, marginBottom: 6, fontSize: 13, color: '#374151', lineHeight: 1.65 }}>{line.slice(2)}</li>;
       if (line.trim() === '') return <br key={i} />;
-      // Handle bold text within paragraphs
-      const boldParts = line.split('**');
-      if (boldParts.length > 1) {
-         return (
-           <p key={i} className="mb-3 text-slate-700 leading-relaxed">
-             {boldParts.map((part, j) => j % 2 === 1 ? <strong key={j}>{part}</strong> : part)}
-           </p>
-         );
-      }
-      return <p key={i} className="mb-3 text-slate-700 leading-relaxed">{line}</p>;
+      const parts = line.split('**');
+      if (parts.length > 1)
+        return (
+          <p key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.7, marginBottom: 8 }}>
+            {parts.map((p, j) => j % 2 === 1 ? <strong key={j} style={{ fontWeight: 500 }}>{p}</strong> : p)}
+          </p>
+        );
+      return <p key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.7, marginBottom: 8 }}>{line}</p>;
     });
   };
 
+  const primaryBtn = (onClick: () => void, disabled: boolean, label: string, icon: React.ReactNode): React.CSSProperties => ({
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+    padding: '8px 18px', borderRadius: 7, fontSize: 13, fontWeight: 500,
+    background: disabled ? '#E5E7EB' : '#3730A3',
+    color:      disabled ? '#9CA3AF' : '#EEF2FF',
+    border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+    fontFamily: FF, transition: 'background 0.15s',
+  });
+
   return (
-    <div className="p-6 h-full overflow-y-auto bg-slate-50">
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold text-slate-900">Deep Analysis</h1>
-        <p className="text-slate-500">Generate structured summaries or compare multiple filings.</p>
+    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: '#FFFFFF' }}>
+
+      {/* Header */}
+      <div style={{ marginBottom: 20 }}>
+        <p style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 2px' }}>Deep analysis</p>
+        <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Generate structured summaries or compare multiple filings.</p>
       </div>
 
-      {/* Mode Toggle */}
-      <div className="flex space-x-1 bg-slate-200 p-1 rounded-lg w-fit mb-8">
-        <button
-          onClick={() => setMode('summary')}
-          className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === 'summary' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-        >
-          <FileText size={16} className="mr-2" />
-          Structured Summary
+      {/* Mode toggle */}
+      <div style={{ display: 'inline-flex', background: '#F3F4F6', borderRadius: 8, padding: 3, gap: 2, marginBottom: 20 }}>
+        <button style={btn(mode === 'summary')} onClick={() => setMode('summary')}>
+          <FileText size={14} />
+          Structured summary
         </button>
-        <button
-          onClick={() => setMode('compare')}
-          className={`flex items-center px-4 py-2 rounded-md text-sm font-medium transition-colors ${mode === 'compare' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
-        >
-          <GitCompare size={16} className="mr-2" />
-          Compare Documents
+        <button style={btn(mode === 'compare')} onClick={() => setMode('compare')}>
+          <GitCompare size={14} />
+          Compare documents
         </button>
       </div>
 
+      {/* Error */}
       {error && (
-        <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-lg flex items-start text-rose-700">
-          <AlertCircle size={20} className="mr-3 mt-0.5 flex-shrink-0" />
-          <p>{error}</p>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: '#FEF2F2', border: '0.5px solid #FECACA', borderRadius: 8, marginBottom: 16, color: '#DC2626', fontSize: 13 }}>
+          <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+          {error}
         </div>
       )}
 
-      {/* Summary Mode */}
+      {/* Summary mode */}
       {mode === 'summary' && (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <label className="block text-sm font-medium text-slate-700 mb-2">Select Document to Summarize</label>
-            <div className="flex space-x-4">
-              <select 
-                className="flex-1 border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '16px 18px' }}>
+            <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Select document to summarize
+            </label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <select
+                style={{ ...selectStyle, flex: 1 }}
                 value={selectedDocForSummary}
-                onChange={(e) => setSelectedDocForSummary(e.target.value)}
+                onChange={e => setSelectedDoc(e.target.value)}
+                onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
+                onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
               >
-                <option value="">-- Select a document --</option>
-                {documents.map(doc => (
-                  <option key={doc.id} value={doc.id}>{doc.name}</option>
-                ))}
+                <option value="">— Select a document —</option>
+                {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-              <button 
+              <button
                 onClick={handleGenerateSummary}
                 disabled={!selectedDocForSummary || isLoading}
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center transition-colors"
+                style={primaryBtn(handleGenerateSummary, !selectedDocForSummary || isLoading, 'Generate', null)}
+                onMouseEnter={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = '#312E81'; }}
+                onMouseLeave={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = '#3730A3'; }}
               >
-                {isLoading ? <Loader2 size={18} className="animate-spin mr-2" /> : <FileText size={18} className="mr-2" />}
-                Generate
+                {isLoading
+                  ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Generating…</>
+                  : <><FileText size={14} /> Generate</>
+                }
               </button>
             </div>
           </div>
 
           {summaryResult && (
-            <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm relative">
-              <button 
-                onClick={() => handleExport(summaryResult, 'Summary_Report')}
-                className="absolute top-6 right-6 text-slate-400 hover:text-indigo-600 flex items-center text-sm font-medium transition-colors"
-              >
-                <Download size={16} className="mr-1" /> Export
-              </button>
-              <div className="prose prose-slate max-w-none">
-                {renderMarkdown(summaryResult)}
-              </div>
-            </div>
+            <ResultCard
+              content={summaryResult}
+              onExport={() => handleExport(summaryResult, 'Summary_Report')}
+              renderMarkdown={renderMarkdown}
+            />
           )}
         </div>
       )}
 
-      {/* Compare Mode */}
+      {/* Compare mode */}
       {mode === 'compare' && (
-        <div className="space-y-6">
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '16px 18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Document A (Baseline)</label>
-                <select 
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Document A — baseline
+                </label>
+                <select
+                  style={selectStyle}
                   value={doc1Id}
-                  onChange={(e) => setDoc1Id(e.target.value)}
+                  onChange={e => setDoc1Id(e.target.value)}
+                  onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
+                  onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
                 >
-                  <option value="">-- Select first document --</option>
-                  {documents.map(doc => (
-                    <option key={doc.id} value={doc.id}>{doc.name}</option>
-                  ))}
+                  <option value="">— Select first document —</option>
+                  {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Document B (Comparison)</label>
-                <select 
-                  className="w-full border border-slate-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Document B — comparison
+                </label>
+                <select
+                  style={selectStyle}
                   value={doc2Id}
-                  onChange={(e) => setDoc2Id(e.target.value)}
+                  onChange={e => setDoc2Id(e.target.value)}
+                  onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
+                  onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
                 >
-                  <option value="">-- Select second document --</option>
-                  {documents.map(doc => (
-                    <option key={doc.id} value={doc.id}>{doc.name}</option>
-                  ))}
+                  <option value="">— Select second document —</option>
+                  {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
             </div>
-            <div className="flex justify-end">
-              <button 
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
                 onClick={handleCompare}
                 disabled={!doc1Id || !doc2Id || doc1Id === doc2Id || isLoading}
-                className="bg-indigo-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-indigo-700 disabled:opacity-50 flex items-center transition-colors"
+                style={primaryBtn(handleCompare, !doc1Id || !doc2Id || doc1Id === doc2Id || isLoading, 'Compare', null)}
+                onMouseEnter={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = '#312E81'; }}
+                onMouseLeave={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = '#3730A3'; }}
               >
-                {isLoading ? <Loader2 size={18} className="animate-spin mr-2" /> : <GitCompare size={18} className="mr-2" />}
-                Compare Documents
+                {isLoading
+                  ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Comparing…</>
+                  : <><GitCompare size={14} /> Compare documents</>
+                }
               </button>
             </div>
           </div>
 
           {compareResult && (
-            <div className="bg-white p-8 rounded-xl border border-slate-200 shadow-sm relative">
-               <button 
-                onClick={() => handleExport(compareResult, 'Comparison_Report')}
-                className="absolute top-6 right-6 text-slate-400 hover:text-indigo-600 flex items-center text-sm font-medium transition-colors"
-              >
-                <Download size={16} className="mr-1" /> Export
-              </button>
-              <div className="prose prose-slate max-w-none">
-                {renderMarkdown(compareResult)}
-              </div>
-            </div>
+            <ResultCard
+              content={compareResult}
+              onExport={() => handleExport(compareResult, 'Comparison_Report')}
+              renderMarkdown={renderMarkdown}
+            />
           )}
         </div>
       )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+};
+
+const ResultCard: React.FC<{
+  content: string;
+  onExport: () => void;
+  renderMarkdown: (t: string) => React.ReactNode;
+}> = ({ content, onExport, renderMarkdown }) => {
+  const [exportHovered, setExportHovered] = useState(false);
+  const FF = "'Inter', system-ui, sans-serif";
+
+  return (
+    <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '18px 20px', position: 'relative' }}>
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <p style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+          AI-generated analysis <span style={{ marginLeft: 4 }}>· grounded in your filings</span>
+        </p>
+        <button
+          onClick={onExport}
+          onMouseEnter={() => setExportHovered(true)}
+          onMouseLeave={() => setExportHovered(false)}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            fontSize: 12, padding: '4px 10px', borderRadius: 6,
+            border: '0.5px solid #E5E7EB',
+            background: exportHovered ? '#F8F7F4' : '#FFFFFF',
+            color: exportHovered ? '#3730A3' : '#6B7280',
+            cursor: 'pointer', fontFamily: FF,
+            transition: 'background 0.1s, color 0.1s',
+          }}
+        >
+          <Download size={13} /> Export .md
+        </button>
+      </div>
+
+      <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", fontSize: 13, lineHeight: 1.75, color: '#374151' }}>
+        {renderMarkdown(content)}
+      </div>
     </div>
   );
 };
