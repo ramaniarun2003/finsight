@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { UploadCloud, FileText, Trash2, CheckCircle, Loader2 } from 'lucide-react';
 import { Document } from '../types';
+import { c, font } from '../theme';
 
 interface DocumentManagerProps {
   documents: Document[];
@@ -8,7 +9,7 @@ interface DocumentManagerProps {
   onRemoveDocument: (id: string) => void;
 }
 
-const FF = "'Inter', system-ui, sans-serif";
+const FF = font.ui;
 
 const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument }) => {
   const [isDragging, setIsDragging]   = useState(false);
@@ -57,12 +58,12 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
   };
 
   return (
-    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: '#FFFFFF' }}>
+    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: c.bg }}>
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <p style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 2px' }}>Document library</p>
-        <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Upload 10-Ks, 10-Qs, and earnings PDFs for RAG analysis.</p>
+        <p style={{ fontSize: 15, fontWeight: 500, color: c.text, margin: '0 0 2px' }}>Document library</p>
+        <p style={{ fontSize: 13, color: c.textMuted, margin: 0 }}>Upload 10-Ks, 10-Qs, and earnings PDFs for RAG analysis.</p>
       </div>
 
       {/* Drop zone */}
@@ -72,32 +73,32 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         style={{
-          border: `2px dashed ${isDragging ? '#4F46E5' : '#E5E7EB'}`,
+          border: `2px dashed ${isDragging ? c.brand : c.border}`,
           borderRadius: 10,
           padding: '28px 20px',
           textAlign: 'center',
           cursor: isUploading ? 'default' : 'pointer',
-          background: isDragging ? '#EEF2FF' : '#FAFAFA',
+          background: isDragging ? c.brandTint : c.surface,
           marginBottom: 16,
           transition: 'border-color 0.15s, background 0.15s',
         }}
-        onMouseEnter={e => { if (!isUploading && !isDragging) (e.currentTarget as HTMLDivElement).style.background = '#F8F7F4'; }}
-        onMouseLeave={e => { if (!isDragging) (e.currentTarget as HTMLDivElement).style.background = isUploading ? '#FAFAFA' : '#FAFAFA'; }}
+        onMouseEnter={e => { if (!isUploading && !isDragging) (e.currentTarget as HTMLDivElement).style.background = c.surfaceAlt; }}
+        onMouseLeave={e => { if (!isDragging) (e.currentTarget as HTMLDivElement).style.background = c.surface; }}
       >
         <input type="file" ref={fileInputRef} onChange={handleFileInput} style={{ display: 'none' }} accept=".pdf,.txt,.csv" />
         {isUploading ? (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <Loader2 size={26} color="#4F46E5" style={{ animation: 'spin 1s linear infinite' }} />
-            <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Processing document and generating embeddings…</p>
+            <Loader2 size={26} color={c.brand} style={{ animation: 'spin 1s linear infinite' }} />
+            <p style={{ fontSize: 13, color: c.textMuted, margin: 0 }}>Processing document and generating embeddings…</p>
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#EEF2FF', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <UploadCloud size={22} color="#4F46E5" />
+            <div style={{ width: 44, height: 44, borderRadius: '50%', background: c.brandTint, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <UploadCloud size={22} color={c.brand} />
             </div>
             <div>
-              <p style={{ fontSize: 14, fontWeight: 500, color: '#374151', margin: '0 0 3px' }}>Click to upload or drag and drop</p>
-              <p style={{ fontSize: 12, color: '#9CA3AF', margin: 0 }}>PDF, TXT, or CSV · max 10MB</p>
+              <p style={{ fontSize: 14, fontWeight: 500, color: c.text2, margin: '0 0 3px' }}>Click to upload or drag and drop</p>
+              <p style={{ fontSize: 12, color: c.textFaint, margin: 0 }}>PDF, TXT, or CSV · max 10MB</p>
             </div>
           </div>
         )}
@@ -114,44 +115,44 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           style={{
             flex: 1, fontSize: 13,
             padding: '8px 12px',
-            border: '0.5px solid #E5E7EB',
+            border: `0.5px solid ${c.border}`,
             borderRadius: 7, outline: 'none',
-            fontFamily: FF, color: '#111827',
-            background: '#FFFFFF',
+            fontFamily: FF, color: c.text,
+            background: c.bg,
           }}
-          onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
-          onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+          onFocus={e  => (e.target.style.borderColor = c.brand)}
+          onBlur={e   => (e.target.style.borderColor = c.border)}
         />
         <button
           onClick={handleFetchEdgar}
           disabled={!ticker.trim() || isUploading}
           style={{
             padding: '8px 16px', borderRadius: 7, fontSize: 13,
-            background: ticker.trim() && !isUploading ? '#3730A3' : '#E5E7EB',
-            color:      ticker.trim() && !isUploading ? '#EEF2FF'  : '#9CA3AF',
+            background: ticker.trim() && !isUploading ? c.brandDeep : c.border,
+            color:      ticker.trim() && !isUploading ? c.onBrand  : c.textFaint,
             border: 'none', cursor: ticker.trim() && !isUploading ? 'pointer' : 'not-allowed',
             fontFamily: FF, fontWeight: 500, flexShrink: 0,
             transition: 'background 0.15s',
           }}
-          onMouseEnter={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = '#312E81'; }}
-          onMouseLeave={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = '#3730A3'; }}
+          onMouseEnter={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = c.brandDeepHover; }}
+          onMouseLeave={e => { if (ticker.trim() && !isUploading) e.currentTarget.style.background = c.brandDeep; }}
         >
           Fetch 10-K
         </button>
       </div>
 
       {/* Document list */}
-      <div style={{ border: '0.5px solid #E5E7EB', borderRadius: 10, overflow: 'hidden' }}>
-        <div style={{ padding: '11px 16px', borderBottom: '0.5px solid #E5E7EB', background: '#F8F7F4', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <p style={{ fontSize: 13, fontWeight: 500, color: '#374151', margin: 0 }}>
+      <div style={{ border: `0.5px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+        <div style={{ padding: '11px 16px', borderBottom: `0.5px solid ${c.border}`, background: c.surface, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <p style={{ fontSize: 13, fontWeight: 500, color: c.text2, margin: 0 }}>
             Indexed documents ({documents.length})
           </p>
         </div>
 
         {documents.length === 0 ? (
           <div style={{ padding: '32px 20px', textAlign: 'center' }}>
-            <FileText size={22} color="#D1D5DB" style={{ margin: '0 auto 8px', display: 'block' }} />
-            <p style={{ fontSize: 13, color: '#9CA3AF', margin: 0 }}>No filings yet — upload above or fetch from EDGAR.</p>
+            <FileText size={22} color={c.textFaint} style={{ margin: '0 auto 8px', display: 'block' }} />
+            <p style={{ fontSize: 13, color: c.textFaint, margin: 0 }}>No filings yet — upload above or fetch from EDGAR.</p>
           </div>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -174,42 +175,41 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
 
 const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> = ({ doc, last, onRemove }) => {
   const [hovered, setHovered] = useState(false);
-  const FF = "'Inter', system-ui, sans-serif";
 
   const is10K = doc.name.toLowerCase().includes('10k') || doc.name.toLowerCase().includes('10-k') || doc.name.toLowerCase().includes('annual');
   const tag = is10K ? '10-K' : '10-Q';
   const tagStyle: React.CSSProperties = is10K
-    ? { background: '#EEF2FF', color: '#3730A3' }
-    : { background: '#ECFDF5', color: '#065F46' };
+    ? { background: c.brandTint, color: c.brand }
+    : { background: c.accentSoft, color: c.accentFg };
 
   return (
     <li
       style={{
         display: 'flex', alignItems: 'center', gap: 12,
         padding: '11px 16px',
-        borderBottom: last ? 'none' : '0.5px solid #E5E7EB',
-        background: hovered ? '#FAFAFA' : '#FFFFFF',
+        borderBottom: last ? 'none' : `0.5px solid ${c.border}`,
+        background: hovered ? c.surface : c.bg,
         transition: 'background 0.1s',
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {/* Icon */}
-      <div style={{ width: 34, height: 34, borderRadius: 7, background: '#FEF2F2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <FileText size={16} color="#DC2626" />
+      <div style={{ width: 34, height: 34, borderRadius: 7, background: c.negSurface, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <FileText size={16} color={c.neg} />
       </div>
 
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: '#111827', margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {doc.name}
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#9CA3AF' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: c.textFaint }}>
           <span>{doc.size}</span>
           <span>·</span>
           <span>Uploaded {doc.uploadDate}</span>
           <span>·</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: '#059669' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: c.pos }}>
             <CheckCircle size={11} />
             Indexed
           </span>
@@ -229,11 +229,11 @@ const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> =
           width: 28, height: 28, borderRadius: 6,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           border: 'none', cursor: 'pointer', flexShrink: 0,
-          background: hovered ? '#FEF2F2' : 'transparent',
-          color: hovered ? '#DC2626' : '#D1D5DB',
+          background: hovered ? c.negSurface : 'transparent',
+          color: hovered ? c.neg : c.textFaint,
           opacity: hovered ? 1 : 0,
           transition: 'opacity 0.15s, background 0.1s, color 0.1s',
-          fontFamily: FF,
+          fontFamily: font.ui,
         }}
       >
         <Trash2 size={15} />

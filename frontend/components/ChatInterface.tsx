@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, FileText, ChevronDown } from 'lucide-react';
 import { Document, ChatMessage } from '../types';
 import { askQuestion } from '../services/gemini';
+import { c, font } from '../theme';
 
 interface ChatInterfaceProps {
   documents: Document[];
@@ -9,16 +10,16 @@ interface ChatInterfaceProps {
 
 // ── style helpers ────────────────────────────────────────────────────────────
 
-const fs: React.CSSProperties = { fontFamily: "'Inter', system-ui, sans-serif" };
+const fs: React.CSSProperties = { fontFamily: font.ui };
 
 const pillBase: React.CSSProperties = {
   fontSize: 11, padding: '3px 10px', borderRadius: 10,
-  cursor: 'pointer', border: 'none', fontFamily: "'Inter', system-ui, sans-serif",
+  cursor: 'pointer', border: 'none', fontFamily: font.ui,
   fontWeight: 500, whiteSpace: 'nowrap',
 };
 
-const pillActive: React.CSSProperties   = { ...pillBase, background: '#EEF2FF', color: '#3730A3' };
-const pillInactive: React.CSSProperties = { ...pillBase, background: '#F3F4F6', color: '#6B7280' };
+const pillActive: React.CSSProperties   = { ...pillBase, background: c.brandTint, color: c.brand };
+const pillInactive: React.CSSProperties = { ...pillBase, background: c.surfaceAlt, color: c.textMuted };
 
 // ── component ────────────────────────────────────────────────────────────────
 
@@ -106,8 +107,8 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
       <div
         style={{
           width: 176, flexShrink: 0,
-          background: '#F8F7F4',
-          borderRight: '0.5px solid #E5E7EB',
+          background: c.surface,
+          borderRight: `0.5px solid ${c.border}`,
           padding: '14px 12px',
           display: 'flex', flexDirection: 'column', gap: 16,
           overflowY: 'auto',
@@ -115,12 +116,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
       >
         {/* Companies */}
         <div>
-          <p style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
+          <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
             Companies
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
             {documents.length === 0 ? (
-              <span style={{ fontSize: 12, color: '#9CA3AF', fontStyle: 'italic' }}>No filings loaded</span>
+              <span style={{ fontSize: 12, color: c.textFaint, fontStyle: 'italic' }}>No filings loaded</span>
             ) : (
               <>
                 <button
@@ -146,20 +147,20 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
 
         {/* Sections */}
         <div>
-          <p style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
+          <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
             Sections
           </p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {(Object.entries({ mda: 'MD&A', risks: 'Risk factors', financials: 'Financials', business: 'Business' }) as [keyof typeof sectionFilters, string][]).map(([key, label]) => (
               <label
                 key={key}
-                style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 7, color: '#374151', cursor: 'pointer' }}
+                style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 7, color: c.text2, cursor: 'pointer' }}
               >
                 <input
                   type="checkbox"
                   checked={sectionFilters[key]}
                   onChange={() => toggleSection(key)}
-                  style={{ accentColor: '#3730A3', margin: 0, cursor: 'pointer' }}
+                  style={{ accentColor: c.brand, margin: 0, cursor: 'pointer' }}
                 />
                 {label}
               </label>
@@ -170,14 +171,14 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
         {/* Loaded filings list */}
         {documents.length > 0 && (
           <div>
-            <p style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
+            <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
               Loaded filings
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
               {documents.map(doc => (
                 <div
                   key={doc.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#6B7280' }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: c.textMuted }}
                 >
                   <FileText size={12} style={{ flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -191,7 +192,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
       </div>
 
       {/* ── Chat area ── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: '#FFFFFF' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, background: c.bg }}>
 
         {/* Messages */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 14 }}>
@@ -205,13 +206,13 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
                   <div
                     style={{
                       width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                      background: isUser ? '#3730A3' : '#F3F4F6',
+                      background: isUser ? c.brandDeep : c.surfaceAlt,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                     }}
                   >
                     {isUser
-                      ? <User size={14} color="#EEF2FF" />
-                      : <Bot size={14} color="#6B7280" />
+                      ? <User size={14} color={c.onBrand} />
+                      : <Bot size={14} color={c.textMuted} />
                     }
                   </div>
 
@@ -221,18 +222,18 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
                       padding: '10px 14px',
                       borderRadius: 10,
                       ...(isUser
-                        ? { background: '#EEF2FF', color: '#312E81', borderBottomRightRadius: 3 }
-                        : { background: '#F8F7F4', color: '#111827', borderBottomLeftRadius: 3 }
+                        ? { background: c.brandTint, color: c.brandDeep, borderBottomRightRadius: 3 }
+                        : { background: c.surface, color: c.text, borderBottomLeftRadius: 3 }
                       ),
                       fontSize: 13, lineHeight: 1.65,
                       whiteSpace: 'pre-wrap',
-                      fontFamily: isUser ? "'Inter', system-ui, sans-serif" : "'Inter', system-ui, sans-serif",
+                      fontFamily: font.ui,
                     }}
                   >
                     {msg.text}
 
                     {/* Timestamp */}
-                    <p style={{ fontSize: 10, color: isUser ? '#818CF8' : '#9CA3AF', margin: '6px 0 0', textAlign: isUser ? 'right' : 'left' }}>
+                    <p style={{ fontSize: 10, color: isUser ? c.textMuted : c.textFaint, margin: '6px 0 0', textAlign: isUser ? 'right' : 'left' }}>
                       {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </p>
                   </div>
@@ -244,12 +245,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
           {/* Loading indicator */}
           {isLoading && (
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#F3F4F6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Bot size={14} color="#6B7280" />
+              <div style={{ width: 28, height: 28, borderRadius: '50%', background: c.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Bot size={14} color={c.textMuted} />
               </div>
-              <div style={{ padding: '10px 14px', borderRadius: 10, borderBottomLeftRadius: 3, background: '#F8F7F4', display: 'flex', alignItems: 'center', gap: 8 }}>
-                <Loader2 size={14} color="#4F46E5" style={{ animation: 'spin 1s linear infinite' }} />
-                <span style={{ fontSize: 13, color: '#6B7280' }}>Searching filings…</span>
+              <div style={{ padding: '10px 14px', borderRadius: 10, borderBottomLeftRadius: 3, background: c.surface, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Loader2 size={14} color={c.brand} style={{ animation: 'spin 1s linear infinite' }} />
+                <span style={{ fontSize: 13, color: c.textMuted }}>Searching filings…</span>
               </div>
             </div>
           )}
@@ -258,7 +259,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
         </div>
 
         {/* Input row */}
-        <div style={{ padding: '10px 16px 12px', borderTop: '0.5px solid #E5E7EB', background: '#FFFFFF' }}>
+        <div style={{ padding: '10px 16px 12px', borderTop: `0.5px solid ${c.border}`, background: c.bg }}>
           <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
             <textarea
               ref={textareaRef}
@@ -271,19 +272,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
                 flex: 1,
                 padding: '9px 13px',
                 fontSize: 13,
-                border: '0.5px solid #E5E7EB',
+                border: `0.5px solid ${c.border}`,
                 borderRadius: 8,
                 outline: 'none',
                 resize: 'none',
-                fontFamily: "'Inter', system-ui, sans-serif",
-                color: '#111827',
-                background: '#FFFFFF',
+                fontFamily: font.ui,
+                color: c.text,
+                background: c.bg,
                 lineHeight: 1.5,
                 height: 40,
                 overflowY: 'hidden',
               }}
-              onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
-              onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+              onFocus={e  => (e.target.style.borderColor = c.brand)}
+              onBlur={e   => (e.target.style.borderColor = c.border)}
             />
             <button
               onClick={handleSend}
@@ -291,17 +292,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
               style={{
                 width: 38, height: 38, flexShrink: 0,
                 borderRadius: 8, border: 'none', cursor: input.trim() && !isLoading ? 'pointer' : 'not-allowed',
-                background: input.trim() && !isLoading ? '#3730A3' : '#E5E7EB',
+                background: input.trim() && !isLoading ? c.brandDeep : c.border,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={e => { if (input.trim() && !isLoading) e.currentTarget.style.background = '#312E81'; }}
-              onMouseLeave={e => { e.currentTarget.style.background = input.trim() && !isLoading ? '#3730A3' : '#E5E7EB'; }}
+              onMouseEnter={e => { if (input.trim() && !isLoading) e.currentTarget.style.background = c.brandDeepHover; }}
+              onMouseLeave={e => { e.currentTarget.style.background = input.trim() && !isLoading ? c.brandDeep : c.border; }}
             >
-              <Send size={15} color={input.trim() && !isLoading ? '#EEF2FF' : '#9CA3AF'} />
+              <Send size={15} color={input.trim() && !isLoading ? c.onBrand : c.textFaint} />
             </button>
           </div>
-          <p style={{ fontSize: 11, color: '#9CA3AF', textAlign: 'center', margin: '6px 0 0' }}>
+          <p style={{ fontSize: 11, color: c.textFaint, textAlign: 'center', margin: '6px 0 0' }}>
             AI responses are grounded in your loaded filings — always verify key figures.
           </p>
         </div>

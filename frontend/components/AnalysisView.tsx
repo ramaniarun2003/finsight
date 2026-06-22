@@ -2,20 +2,21 @@ import React, { useState } from 'react';
 import { FileText, GitCompare, Download, Loader2, AlertCircle } from 'lucide-react';
 import { Document } from '../types';
 import { generateSummary, compareDocuments } from '../services/gemini';
+import { c, font } from '../theme';
 
 interface AnalysisViewProps {
   documents: Document[];
 }
 
-const FF = "'Inter', system-ui, sans-serif";
+const FF = font.ui;
 
 const btn = (active: boolean): React.CSSProperties => ({
   display: 'inline-flex', alignItems: 'center', gap: 6,
   padding: '7px 16px', borderRadius: 7, fontSize: 13,
   fontWeight: active ? 500 : 400,
-  background: active ? '#FFFFFF' : 'transparent',
-  color:      active ? '#3730A3' : '#6B7280',
-  border:     active ? '0.5px solid #E5E7EB' : 'none',
+  background: active ? c.bg : 'transparent',
+  color:      active ? c.brand : c.textMuted,
+  border:     active ? `0.5px solid ${c.border}` : 'none',
   cursor: 'pointer', fontFamily: FF,
   transition: 'background 0.1s, color 0.1s',
 });
@@ -23,10 +24,10 @@ const btn = (active: boolean): React.CSSProperties => ({
 const selectStyle: React.CSSProperties = {
   width: '100%', fontSize: 13,
   padding: '8px 12px',
-  border: '0.5px solid #E5E7EB',
+  border: `0.5px solid ${c.border}`,
   borderRadius: 7, outline: 'none',
-  fontFamily: FF, color: '#111827',
-  background: '#FFFFFF', cursor: 'pointer',
+  fontFamily: FF, color: c.text,
+  background: c.bg, cursor: 'pointer',
 };
 
 const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
@@ -74,43 +75,43 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
     if (!text) return null;
     return text.split('\n').map((line, i) => {
       if (line.startsWith('## '))
-        return <h2 key={i} style={{ fontSize: 16, fontWeight: 500, color: '#111827', margin: '20px 0 8px' }}>{line.slice(3)}</h2>;
+        return <h2 key={i} style={{ fontSize: 16, fontWeight: 500, color: c.text, margin: '20px 0 8px' }}>{line.slice(3)}</h2>;
       if (line.startsWith('# '))
-        return <h1 key={i} style={{ fontSize: 18, fontWeight: 500, color: '#111827', margin: '20px 0 10px' }}>{line.slice(2)}</h1>;
+        return <h1 key={i} style={{ fontSize: 18, fontWeight: 500, color: c.text, margin: '20px 0 10px' }}>{line.slice(2)}</h1>;
       if (line.startsWith('- ') || line.startsWith('* '))
-        return <li key={i} style={{ marginLeft: 16, marginBottom: 6, fontSize: 13, color: '#374151', lineHeight: 1.65 }}>{line.slice(2)}</li>;
+        return <li key={i} style={{ marginLeft: 16, marginBottom: 6, fontSize: 13, color: c.text2, lineHeight: 1.65 }}>{line.slice(2)}</li>;
       if (line.trim() === '') return <br key={i} />;
       const parts = line.split('**');
       if (parts.length > 1)
         return (
-          <p key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.7, marginBottom: 8 }}>
+          <p key={i} style={{ fontSize: 13, color: c.text2, lineHeight: 1.7, marginBottom: 8 }}>
             {parts.map((p, j) => j % 2 === 1 ? <strong key={j} style={{ fontWeight: 500 }}>{p}</strong> : p)}
           </p>
         );
-      return <p key={i} style={{ fontSize: 13, color: '#374151', lineHeight: 1.7, marginBottom: 8 }}>{line}</p>;
+      return <p key={i} style={{ fontSize: 13, color: c.text2, lineHeight: 1.7, marginBottom: 8 }}>{line}</p>;
     });
   };
 
   const primaryBtn = (onClick: () => void, disabled: boolean, label: string, icon: React.ReactNode): React.CSSProperties => ({
     display: 'inline-flex', alignItems: 'center', gap: 6,
     padding: '8px 18px', borderRadius: 7, fontSize: 13, fontWeight: 500,
-    background: disabled ? '#E5E7EB' : '#3730A3',
-    color:      disabled ? '#9CA3AF' : '#EEF2FF',
+    background: disabled ? c.border : c.brandDeep,
+    color:      disabled ? c.textFaint : c.onBrand,
     border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
     fontFamily: FF, transition: 'background 0.15s',
   });
 
   return (
-    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: '#FFFFFF' }}>
+    <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: c.bg }}>
 
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <p style={{ fontSize: 15, fontWeight: 500, color: '#111827', margin: '0 0 2px' }}>Deep analysis</p>
-        <p style={{ fontSize: 13, color: '#6B7280', margin: 0 }}>Generate structured summaries or compare multiple filings.</p>
+        <p style={{ fontSize: 15, fontWeight: 500, color: c.text, margin: '0 0 2px' }}>Deep analysis</p>
+        <p style={{ fontSize: 13, color: c.textMuted, margin: 0 }}>Generate structured summaries or compare multiple filings.</p>
       </div>
 
       {/* Mode toggle */}
-      <div style={{ display: 'inline-flex', background: '#F3F4F6', borderRadius: 8, padding: 3, gap: 2, marginBottom: 20 }}>
+      <div style={{ display: 'inline-flex', background: c.surfaceAlt, borderRadius: 8, padding: 3, gap: 2, marginBottom: 20 }}>
         <button style={btn(mode === 'summary')} onClick={() => setMode('summary')}>
           <FileText size={14} />
           Structured summary
@@ -123,7 +124,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
 
       {/* Error */}
       {error && (
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: '#FEF2F2', border: '0.5px solid #FECACA', borderRadius: 8, marginBottom: 16, color: '#DC2626', fontSize: 13 }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', background: c.negSurface, border: `0.5px solid ${c.negBorder}`, borderRadius: 8, marginBottom: 16, color: c.neg, fontSize: 13 }}>
           <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
           {error}
         </div>
@@ -132,8 +133,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
       {/* Summary mode */}
       {mode === 'summary' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '16px 18px' }}>
-            <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          <div style={{ background: c.bg, border: `0.5px solid ${c.border}`, borderRadius: 10, padding: '16px 18px' }}>
+            <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Select document to summarize
             </label>
             <div style={{ display: 'flex', gap: 10 }}>
@@ -141,8 +142,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
                 style={{ ...selectStyle, flex: 1 }}
                 value={selectedDocForSummary}
                 onChange={e => setSelectedDoc(e.target.value)}
-                onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
-                onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+                onFocus={e  => (e.target.style.borderColor = c.brand)}
+                onBlur={e   => (e.target.style.borderColor = c.border)}
               >
                 <option value="">— Select a document —</option>
                 {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -151,8 +152,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
                 onClick={handleGenerateSummary}
                 disabled={!selectedDocForSummary || isLoading}
                 style={primaryBtn(handleGenerateSummary, !selectedDocForSummary || isLoading, 'Generate', null)}
-                onMouseEnter={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = '#312E81'; }}
-                onMouseLeave={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = '#3730A3'; }}
+                onMouseEnter={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = c.brandDeepHover; }}
+                onMouseLeave={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = c.brandDeep; }}
               >
                 {isLoading
                   ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Generating…</>
@@ -175,33 +176,33 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
       {/* Compare mode */}
       {mode === 'compare' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '16px 18px' }}>
+          <div style={{ background: c.bg, border: `0.5px solid ${c.border}`, borderRadius: 10, padding: '16px 18px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Document A — baseline
                 </label>
                 <select
                   style={selectStyle}
                   value={doc1Id}
                   onChange={e => setDoc1Id(e.target.value)}
-                  onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
-                  onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+                  onFocus={e  => (e.target.style.borderColor = c.brand)}
+                  onBlur={e   => (e.target.style.borderColor = c.border)}
                 >
                   <option value="">— Select first document —</option>
                   {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: '#6B7280', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Document B — comparison
                 </label>
                 <select
                   style={selectStyle}
                   value={doc2Id}
                   onChange={e => setDoc2Id(e.target.value)}
-                  onFocus={e  => (e.target.style.borderColor = '#4F46E5')}
-                  onBlur={e   => (e.target.style.borderColor = '#E5E7EB')}
+                  onFocus={e  => (e.target.style.borderColor = c.brand)}
+                  onBlur={e   => (e.target.style.borderColor = c.border)}
                 >
                   <option value="">— Select second document —</option>
                   {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -213,8 +214,8 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
                 onClick={handleCompare}
                 disabled={!doc1Id || !doc2Id || doc1Id === doc2Id || isLoading}
                 style={primaryBtn(handleCompare, !doc1Id || !doc2Id || doc1Id === doc2Id || isLoading, 'Compare', null)}
-                onMouseEnter={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = '#312E81'; }}
-                onMouseLeave={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = '#3730A3'; }}
+                onMouseEnter={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = c.brandDeepHover; }}
+                onMouseLeave={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = c.brandDeep; }}
               >
                 {isLoading
                   ? <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Comparing…</>
@@ -245,13 +246,12 @@ const ResultCard: React.FC<{
   renderMarkdown: (t: string) => React.ReactNode;
 }> = ({ content, onExport, renderMarkdown }) => {
   const [exportHovered, setExportHovered] = useState(false);
-  const FF = "'Inter', system-ui, sans-serif";
 
   return (
-    <div style={{ background: '#FFFFFF', border: '0.5px solid #E5E7EB', borderRadius: 10, padding: '18px 20px', position: 'relative' }}>
+    <div style={{ background: c.bg, border: `0.5px solid ${c.border}`, borderRadius: 10, padding: '18px 20px', position: 'relative' }}>
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-        <p style={{ fontSize: 11, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
+        <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', margin: 0 }}>
           AI-generated analysis <span style={{ marginLeft: 4 }}>· grounded in your filings</span>
         </p>
         <button
@@ -261,10 +261,10 @@ const ResultCard: React.FC<{
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 5,
             fontSize: 12, padding: '4px 10px', borderRadius: 6,
-            border: '0.5px solid #E5E7EB',
-            background: exportHovered ? '#F8F7F4' : '#FFFFFF',
-            color: exportHovered ? '#3730A3' : '#6B7280',
-            cursor: 'pointer', fontFamily: FF,
+            border: `0.5px solid ${c.border}`,
+            background: exportHovered ? c.surface : c.bg,
+            color: exportHovered ? c.brand : c.textMuted,
+            cursor: 'pointer', fontFamily: font.ui,
             transition: 'background 0.1s, color 0.1s',
           }}
         >
@@ -272,7 +272,7 @@ const ResultCard: React.FC<{
         </button>
       </div>
 
-      <div style={{ fontFamily: "'Libre Baskerville', Georgia, serif", fontSize: 13, lineHeight: 1.75, color: '#374151' }}>
+      <div style={{ fontFamily: font.prose, fontSize: 13, lineHeight: 1.75, color: c.text2 }}>
         {renderMarkdown(content)}
       </div>
     </div>

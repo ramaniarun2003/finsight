@@ -31,4 +31,5 @@ export interface CompanyMetrics {
   marketCap: string;
 }
 
-export type ViewState = 'dashboard' | 'documents' | 'chat' | 'analysis';
+
+export type ViewState = 'dashboard' | 'documents' | 'chat' | 'analysis' | 'help';
