@@ -1,242 +1,293 @@
 """
-Embedding + vector-store layer.
+backend/data_extract/embeddings.py
 
-Bridges extraction and RAG: takes the structured JSON from ``extractor.run``,
-chunks the narrative sections, embeds each chunk with Gemini, and upserts the
-vectors into a persistent Chroma collection. ``search`` embeds a query and
-returns the nearest chunks for the generation step to use as context.
+RavenDB-backed embedding ingest + semantic search for FinSight.
 
-Numbers (``metrics``) are intentionally NOT embedded -- they're structured data,
-better queried directly (and the natural home for the Neo4j/GraphRAG idea).
-Only the ``sections`` narrative goes through embeddings.
+Design preserved from the Chroma version:
+  - Paragraph-aware chunking
+  - Explicit L2 normalization of vectors
+  - Task-type asymmetry (RETRIEVAL_DOCUMENT for ingest, RETRIEVAL_QUERY for search)
+  - Deterministic document IDs (re-ingest = upsert, never duplicates)
+  - CLI with `ingest` / `search` subcommands
 
-Run from the repo root:
-    python -m backend.data_extract.embeddings ingest AEO 10-K
-    python -m backend.data_extract.embeddings search "supply chain risk for Gap"
+Embeddings are generated locally with gemini-embedding-001 via google-genai and
+stored on the document as a plain float array. RavenDB indexes pre-made numerical
+arrays directly (no transformation), so all generation control stays in this module.
+
+Prerequisites:
+  - A running RavenDB server (7.x) using the Corax search engine
+  - pip install ravendb google-genai numpy
+  - Env: RAVENDB_URLS (comma-separated), RAVENDB_DATABASE, GEMINI_API_KEY
 """
 
+from __future__ import annotations
+
+import argparse
+import hashlib
+import logging
 import os
 import re
-import math
-import logging
-from pathlib import Path
+from typing import Iterable, Optional
+
+import numpy as np
+from google import genai
+from google.genai import types
+from ravendb import DocumentStore
 
 logger = logging.getLogger(__name__)
 
-# gemini-embedding-001 is the GA model; text-embedding-004 was retired 2026-01-14.
+# --- Configuration ----------------------------------------------------------
+
+RAVENDB_URLS = [u.strip() for u in os.getenv("RAVENDB_URLS", "http://127.0.0.1:8080").split(",")]
+RAVENDB_DATABASE = os.getenv("RAVENDB_DATABASE", "finsight")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
 EMBED_MODEL = "gemini-embedding-001"
-# 768 keeps storage lean (vs the 3072 default) via Matryoshka truncation.
-# NOTE: at <3072 dims the API does NOT return unit vectors, so we normalize.
-EMBED_DIM = 768
-COLLECTION_NAME = "finsight_filings"
-CHROMA_PATH = str(Path(__file__).resolve().parent / "chroma_db")
+EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))  # must stay consistent across all docs
+COLLECTION = "FilingChunks"
 
-_MAX_BATCH = 100  # Gemini caps embed_content at 100 inputs per call.
+# Embedding batch size (Gemini accepts batched contents)
+EMBED_BATCH = 64
 
-_client = None
+# --- Singletons -------------------------------------------------------------
 
-
-# --------------------------------------------------------------------------- #
-# Lazy clients (kept inside functions so the pure helpers below are importable
-# and testable without google-genai / chromadb installed).
-# --------------------------------------------------------------------------- #
-def _genai_client():
-    global _client
-    if _client is None:
-        from google import genai
-
-        key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-        if not key:
-            raise RuntimeError(
-                "No API key found. Set GEMINI_API_KEY (e.g. in .env.local)."
-            )
-        _client = genai.Client(api_key=key)
-    return _client
+_store: Optional[DocumentStore] = None
+_genai_client: Optional[genai.Client] = None
 
 
-def _collection(chroma_path: str):
-    import chromadb
-
-    client = chromadb.PersistentClient(path=chroma_path)
-    # cosine space pairs with normalized vectors; Chroma's default is L2.
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Pure helpers
-# --------------------------------------------------------------------------- #
-def chunk_text(text: str, max_chars: int = 2000, overlap: int = 200) -> list[str]:
-    """Paragraph-aware splitter.
-
-    Splits on blank lines and packs whole paragraphs up to ``max_chars`` so a
-    risk factor or MD&A point isn't sliced mid-sentence. Paragraphs longer than
-    the limit are hard-split as a fallback. ``overlap`` carries a tail of the
-    previous chunk into the next for context continuity.
-    """
-    text = (text or "").strip()
-    if not text:
-        return []
-
-    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
-    chunks: list[str] = []
-    current = ""
-
-    for p in paragraphs:
-        if len(p) > max_chars:
-            if current:
-                chunks.append(current)
-                current = ""
-            step = max(1, max_chars - overlap)
-            for i in range(0, len(p), step):
-                chunks.append(p[i : i + max_chars])
-            continue
-
-        if not current:
-            current = p
-        elif len(current) + len(p) + 2 <= max_chars:
-            current = f"{current}\n\n{p}"
-        else:
-            chunks.append(current)
-            tail = current[-overlap:] if overlap else ""
-            current = f"{tail}\n\n{p}" if tail else p
-
-    if current:
-        chunks.append(current)
-    return chunks
+def get_store() -> DocumentStore:
+    """Lazily initialize and return the shared RavenDB DocumentStore."""
+    global _store
+    if _store is None:
+        store = DocumentStore(RAVENDB_URLS, RAVENDB_DATABASE)
+        store.initialize()
+        _store = store
+        logger.info("Initialized RavenDB store: %s db=%s", RAVENDB_URLS, RAVENDB_DATABASE)
+    return _store
 
 
-def _normalize(vec: list[float]) -> list[float]:
-    norm = math.sqrt(sum(x * x for x in vec))
-    return [x / norm for x in vec] if norm else vec
+def get_genai_client() -> genai.Client:
+    global _genai_client
+    if _genai_client is None:
+        if not GEMINI_API_KEY:
+            raise RuntimeError("GEMINI_API_KEY is not set")
+        _genai_client = genai.Client(api_key=GEMINI_API_KEY)
+    return _genai_client
 
 
-# --------------------------------------------------------------------------- #
-# Embedding
-# --------------------------------------------------------------------------- #
-def _embed(texts: list[str], task_type: str) -> list[list[float]]:
-    """Embed texts in batches. task_type is RETRIEVAL_DOCUMENT or RETRIEVAL_QUERY."""
-    from google.genai import types
+# --- Document model ---------------------------------------------------------
 
-    client = _genai_client()
-    out: list[list[float]] = []
-    for i in range(0, len(texts), _MAX_BATCH):
-        batch = texts[i : i + _MAX_BATCH]
+class FilingChunk:
+    """A single embedded chunk of an SEC filing."""
+
+    def __init__(
+        self,
+        Id: Optional[str] = None,
+        ticker: str = "",
+        form: str = "",
+        source: str = "",
+        chunk_index: int = 0,
+        text: str = "",
+        embedding: Optional[list] = None,
+    ):
+        self.Id = Id
+        self.ticker = ticker
+        self.form = form
+        self.source = source
+        self.chunk_index = chunk_index
+        self.text = text
+        # Stored as a plain float array. For large corpora, swap to RavenDB's
+        # RavenVector type for tighter storage / faster reads.
+        self.embedding = embedding or []
+
+
+# --- Embedding generation ---------------------------------------------------
+
+def _normalize(vec: Iterable[float]) -> list:
+    """L2-normalize a vector; required for sub-3072 cosine consistency."""
+    arr = np.asarray(list(vec), dtype=np.float32)
+    norm = float(np.linalg.norm(arr))
+    if norm == 0.0:
+        return arr.tolist()
+    return (arr / norm).tolist()
+
+
+def embed_texts(texts: list[str], task_type: str) -> list[list]:
+    """Embed a list of texts with the given task type, normalized."""
+    client = get_genai_client()
+    out: list[list] = []
+    for start in range(0, len(texts), EMBED_BATCH):
+        batch = texts[start:start + EMBED_BATCH]
         resp = client.models.embed_content(
             model=EMBED_MODEL,
             contents=batch,
             config=types.EmbedContentConfig(
-                task_type=task_type, output_dimensionality=EMBED_DIM
+                task_type=task_type,
+                output_dimensionality=EMBED_DIM,
             ),
         )
         out.extend(_normalize(e.values) for e in resp.embeddings)
     return out
 
 
-def embed_filing(data: dict, chroma_path: str = CHROMA_PATH) -> int:
-    """Chunk + embed a filing's sections and upsert into Chroma.
+# --- Chunking ---------------------------------------------------------------
 
-    Takes the dict returned by ``extractor.run``. Returns the chunk count.
-    Uses deterministic IDs + upsert, so re-running on the same filing replaces
-    rather than duplicates.
+_PARA_SPLIT = re.compile(r"\n\s*\n+")
+
+
+def chunk_text(text: str, max_chars: int = 1800, overlap_paras: int = 1) -> list[str]:
     """
-    ticker = data["ticker"]
-    form = data["form"]
-    accession = data["accession_number"]
+    Paragraph-aware chunking: group whole paragraphs up to a soft char budget,
+    carrying a small paragraph overlap between consecutive chunks for context.
+    """
+    paras = [p.strip() for p in _PARA_SPLIT.split(text) if p.strip()]
+    chunks: list[str] = []
+    buf: list[str] = []
+    size = 0
 
-    base_meta = {
-        "ticker": ticker,
-        "form": form,
-        "filing_date": data["filing_date"],
-        "accession_number": accession,
-        "source_url": data["source_url"],
-    }
+    for para in paras:
+        if buf and size + len(para) > max_chars:
+            chunks.append("\n\n".join(buf))
+            # start next buffer with a paragraph of overlap
+            buf = buf[-overlap_paras:] if overlap_paras else []
+            size = sum(len(p) for p in buf)
+        buf.append(para)
+        size += len(para)
 
-    ids, docs, metas = [], [], []
-    for section, sec_text in data["sections"].items():
-        for j, chunk in enumerate(chunk_text(sec_text)):
-            ids.append(f"{ticker}_{form}_{accession}_{section}_{j}")
-            docs.append(chunk)
-            metas.append({**base_meta, "section": section, "chunk_index": j})
+    if buf:
+        chunks.append("\n\n".join(buf))
+    return chunks
 
-    if not docs:
-        logger.warning("No narrative chunks produced for %s %s", ticker, form)
+
+# --- IDs --------------------------------------------------------------------
+
+def _chunk_id(ticker: str, form: str, source: str, idx: int) -> str:
+    raw = f"{ticker}|{form}|{source}|{idx}".encode("utf-8")
+    digest = hashlib.sha1(raw).hexdigest()[:16]
+    return f"{COLLECTION}/{ticker}-{form}-{digest}"
+
+
+# --- Ingest -----------------------------------------------------------------
+
+def ingest(ticker: str, form: str, text: str, source: str) -> int:
+    """
+    Chunk -> embed (RETRIEVAL_DOCUMENT) -> upsert into RavenDB.
+    Returns the number of chunks stored. Re-ingesting the same source overwrites
+    by deterministic ID instead of duplicating.
+    """
+    ticker = ticker.strip().upper()
+    chunks = chunk_text(text)
+    if not chunks:
+        logger.warning("No chunks produced for %s %s (%s)", ticker, form, source)
         return 0
 
-    logger.info("Embedding %d chunks for %s %s...", len(docs), ticker, form)
-    embeds = _embed(docs, "RETRIEVAL_DOCUMENT")
+    vectors = embed_texts(chunks, task_type="RETRIEVAL_DOCUMENT")
 
-    coll = _collection(chroma_path)
-    coll.upsert(ids=ids, embeddings=embeds, documents=docs, metadatas=metas)
-    logger.info("Upserted %d chunks into '%s'.", len(docs), COLLECTION_NAME)
-    return len(docs)
+    store = get_store()
+    with store.open_session() as session:
+        for idx, (chunk, vec) in enumerate(zip(chunks, vectors)):
+            doc_id = _chunk_id(ticker, form, source, idx)
+            doc = FilingChunk(
+                Id=doc_id,
+                ticker=ticker,
+                form=form,
+                source=source,
+                chunk_index=idx,
+                text=chunk,
+                embedding=vec,
+            )
+            session.store(doc, doc_id)
+        session.save_changes()
 
+    logger.info("Ingested %d chunks for %s %s (%s)", len(chunks), ticker, form, source)
+    return len(chunks)
+
+
+# --- Search -----------------------------------------------------------------
 
 def search(
     query: str,
-    n_results: int = 5,
-    where: dict | None = None,
-    chroma_path: str = CHROMA_PATH,
-) -> list[dict]:
-    """Embed a query (RETRIEVAL_QUERY) and return the nearest chunks.
-
-    ``where`` is a Chroma metadata filter, e.g. {"ticker": "AEO"} to scope to
-    one company.
+    k: int = 5,
+    ticker: Optional[str] = None,
+    form: Optional[str] = None,
+    min_similarity: float = 0.75,
+    candidates: int = 32,
+) -> list[FilingChunk]:
     """
-    qvec = _embed([query], "RETRIEVAL_QUERY")[0]
-    coll = _collection(chroma_path)
-    res = coll.query(query_embeddings=[qvec], n_results=n_results, where=where)
+    Embed the query (RETRIEVAL_QUERY) and run a dynamic vector search.
+    Optional ticker/form act as regular filters combined with the vector search.
+    """
+    qvec = embed_texts([query], task_type="RETRIEVAL_QUERY")[0]
 
-    hits = []
-    for doc, meta, dist in zip(
-        res["documents"][0], res["metadatas"][0], res["distances"][0]
-    ):
-        hits.append({"text": doc, "metadata": meta, "distance": dist})
-    return hits
+    filters = []
+    if ticker:
+        filters.append("ticker = $ticker")
+    if form:
+        filters.append("form = $form")
+    filter_clause = (" and ".join(filters) + " and ") if filters else ""
+
+    rql = (
+        f'from "{COLLECTION}" '
+        f"where {filter_clause}"
+        f"vector.search(embedding, $queryVector, $minSim, $candidates) "
+        f"limit {int(k)}"
+    )
+
+    store = get_store()
+    with store.open_session() as session:
+        q = (
+            session.advanced.raw_query(rql, object_type=FilingChunk)
+            .add_parameter("queryVector", qvec)
+            .add_parameter("minSim", min_similarity)
+            .add_parameter("candidates", candidates)
+        )
+        if ticker:
+            q = q.add_parameter("ticker", ticker.strip().upper())
+        if form:
+            q = q.add_parameter("form", form)
+        return list(q)
 
 
-# --------------------------------------------------------------------------- #
-# CLI
-# --------------------------------------------------------------------------- #
-if __name__ == "__main__":
-    import argparse
+# --- CLI --------------------------------------------------------------------
 
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(".env.local")
-        load_dotenv()
-    except ImportError:
-        pass
-
-    logging.basicConfig(level=logging.INFO, format="%(message)s")
-
-    parser = argparse.ArgumentParser(description="FinSight embeddings")
+def _cli() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    parser = argparse.ArgumentParser(description="FinSight embeddings (RavenDB)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_ingest = sub.add_parser("ingest", help="Extract a filing and embed it")
-    p_ingest.add_argument("ticker")
-    p_ingest.add_argument("form", nargs="?", default="10-K")
+    p_ingest = sub.add_parser("ingest", help="Embed and store a filing")
+    p_ingest.add_argument("--ticker", required=True)
+    p_ingest.add_argument("--form", required=True, choices=["10-K", "10-Q"])
+    p_ingest.add_argument("--source", required=True, help="Filing identifier / path")
+    p_ingest.add_argument("--file", required=True, help="Path to extracted filing text")
 
-    p_search = sub.add_parser("search", help="Query the vector store")
-    p_search.add_argument("query")
-    p_search.add_argument("-n", type=int, default=5)
-    p_search.add_argument("--ticker", default=None, help="Filter to one ticker")
+    p_search = sub.add_parser("search", help="Semantic search over stored filings")
+    p_search.add_argument("--query", required=True)
+    p_search.add_argument("--k", type=int, default=5)
+    p_search.add_argument("--ticker", default=None)
+    p_search.add_argument("--form", default=None, choices=["10-K", "10-Q", None])
+    p_search.add_argument("--min-similarity", type=float, default=0.75)
 
     args = parser.parse_args()
 
     if args.command == "ingest":
-        from .extractor import run
-
-        data = run(args.ticker, args.form)
-        count = embed_filing(data)
-        print(f"\nEmbedded {count} chunks for {args.ticker} {args.form}.")
+        with open(args.file, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        n = ingest(args.ticker, args.form, text, args.source)
+        print(f"Stored {n} chunks.")
 
     elif args.command == "search":
-        where = {"ticker": args.ticker.upper()} if args.ticker else None
-        for i, hit in enumerate(search(args.query, n_results=args.n, where=where), 1):
-            m = hit["metadata"]
-            print(f"\n[{i}] {m['ticker']} {m['form']} | {m['section']} "
-                  f"| dist={hit['distance']:.4f}")
-            print(hit["text"][:300].replace("\n", " ") + "...")
+        results = search(
+            args.query,
+            k=args.k,
+            ticker=args.ticker,
+            form=args.form,
+            min_similarity=args.min_similarity,
+        )
+        for r in results:
+            preview = r.text[:160].replace("\n", " ")
+            print(f"[{r.ticker} {r.form} #{r.chunk_index}] {preview}...")
+
+
+if __name__ == "__main__":
+    _cli()
