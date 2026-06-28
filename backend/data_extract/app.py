@@ -1,35 +1,61 @@
 """
-FastAPI service exposing the extraction pipeline over HTTP.
+FastAPI service for FinSight (backend/data_extract/app.py).
 
-Thin web layer: it imports the pure pipeline from ``extractor`` and wraps it in
-a route. This sits upstream of the AI — it turns a ticker into clean data that
-the model then analyzes.
+Two surfaces:
+  - GET  /extract/{ticker}  -> extraction pipeline (ticker -> clean structured data)
+  - POST /api/chat          -> RAG chat (RavenDB retrieval + Gemini generation)
 
 Run from the repo root:
     uvicorn backend.data_extract.app:app --reload --port 8000
 Then call:
-    GET http://localhost:8000/extract/AEO
+    GET  http://localhost:8000/health
+    GET  http://localhost:8000/extract/AEO
+    POST http://localhost:8000/api/chat   {"question": "..."}
 """
 
 import logging
+import os
+from pathlib import Path
 from typing import Literal
+
+# Load the env file (.env.python at backend/) BEFORE importing modules that read
+# os.getenv at import time — embeddings.py captures the Gemini/Vertex and RavenDB
+# settings on import, so this must run first.
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).resolve().parents[1] / ".env.python")
+except ImportError:
+    # No python-dotenv — rely on `uvicorn --env-file` or an already-set env.
+    pass
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from .extractor import run
+from .rag import router as chat_router
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="FinSight Extraction Service")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
+
+app = FastAPI(title="FinSight Service")
 
 # Allow the Vite dev frontend to call this service from the browser.
+# Methods are broadened to all (not just GET), since /api/chat is a POST and the
+# browser preflight (OPTIONS) must be permitted too.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
-    allow_methods=["GET"],
+    allow_origins=[FRONTEND_ORIGIN],
+    allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(chat_router)
+
+
+@app.get("/health")
+def health() -> dict:
+    return {"status": "ok"}
 
 
 @app.get("/extract/{ticker}")

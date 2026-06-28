@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, GitCompare, Download, Loader2, AlertCircle } from 'lucide-react';
+import { FileText, GitCompare, Download, Loader2, AlertCircle, AlertTriangle } from 'lucide-react';
 import { Document } from '../types';
 import { generateSummary, compareDocuments } from '../services/gemini';
 import { c, font } from '../theme';
@@ -30,6 +30,20 @@ const selectStyle: React.CSSProperties = {
   background: c.bg, cursor: 'pointer',
 };
 
+const primaryBtn = (disabled: boolean): React.CSSProperties => ({
+  display: 'inline-flex', alignItems: 'center', gap: 6,
+  padding: '8px 18px', borderRadius: 7, fontSize: 13, fontWeight: 500,
+  background: disabled ? c.border : c.brandDeep,
+  color:      disabled ? c.textFaint : c.onBrand,
+  border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
+  fontFamily: FF, transition: 'background 0.15s',
+});
+
+const labelStyle: React.CSSProperties = {
+  display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8,
+  textTransform: 'uppercase', letterSpacing: '0.04em',
+};
+
 const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
   const [mode, setMode]                           = useState<'summary' | 'compare'>('summary');
   const [selectedDocForSummary, setSelectedDoc]   = useState('');
@@ -39,6 +53,23 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
   const [compareResult, setCompareResult]         = useState('');
   const [isLoading, setIsLoading]                 = useState(false);
   const [error, setError]                         = useState<string | null>(null);
+
+  const docA = documents.find(d => d.id === doc1Id);
+  const docB = documents.find(d => d.id === doc2Id);
+  const aSector = docA?.sector;
+
+  // Document B candidates, grouped relative to A's sector. Exclude A itself.
+  const bCandidates  = documents.filter(d => d.id !== doc1Id);
+  const sameSector   = aSector ? bCandidates.filter(d => d.sector === aSector) : [];
+  const otherSector  = aSector ? bCandidates.filter(d => d.sector !== aSector) : bCandidates;
+
+  // Soft guard: both chosen, both have sectors, and they differ.
+  const sectorMismatch = !!(docA?.sector && docB?.sector && docA.sector !== docB.sector);
+
+  const handlePickA = (id: string) => {
+    setDoc1Id(id);
+    if (id === doc2Id) setDoc2Id(''); // can't compare a doc to itself
+  };
 
   const handleGenerateSummary = async () => {
     if (!selectedDocForSummary) return;
@@ -54,11 +85,9 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
     if (!doc1Id || !doc2Id || doc1Id === doc2Id) {
       setError('Please select two different documents to compare.'); return;
     }
-    const d1 = documents.find(d => d.id === doc1Id);
-    const d2 = documents.find(d => d.id === doc2Id);
-    if (!d1 || !d2) return;
+    if (!docA || !docB) return;
     setIsLoading(true); setError(null);
-    try   { setCompareResult(await compareDocuments(d1.name, d1.content, d2.name, d2.content)); }
+    try   { setCompareResult(await compareDocuments(docA.name, docA.content, docB.name, docB.content)); }
     catch (err: any) { setError(err.message); }
     finally { setIsLoading(false); }
   };
@@ -91,15 +120,6 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
       return <p key={i} style={{ fontSize: 13, color: c.text2, lineHeight: 1.7, marginBottom: 8 }}>{line}</p>;
     });
   };
-
-  const primaryBtn = (onClick: () => void, disabled: boolean, label: string, icon: React.ReactNode): React.CSSProperties => ({
-    display: 'inline-flex', alignItems: 'center', gap: 6,
-    padding: '8px 18px', borderRadius: 7, fontSize: 13, fontWeight: 500,
-    background: disabled ? c.border : c.brandDeep,
-    color:      disabled ? c.textFaint : c.onBrand,
-    border: 'none', cursor: disabled ? 'not-allowed' : 'pointer',
-    fontFamily: FF, transition: 'background 0.15s',
-  });
 
   return (
     <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: c.bg }}>
@@ -134,9 +154,7 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
       {mode === 'summary' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ background: c.bg, border: `0.5px solid ${c.border}`, borderRadius: 10, padding: '16px 18px' }}>
-            <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Select document to summarize
-            </label>
+            <label style={labelStyle}>Select document to summarize</label>
             <div style={{ display: 'flex', gap: 10 }}>
               <select
                 style={{ ...selectStyle, flex: 1 }}
@@ -146,12 +164,12 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
                 onBlur={e   => (e.target.style.borderColor = c.border)}
               >
                 <option value="">— Select a document —</option>
-                {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {documents.map(d => <option key={d.id} value={d.id}>{d.name}{d.sector ? ` — ${d.sector}` : ''}</option>)}
               </select>
               <button
                 onClick={handleGenerateSummary}
                 disabled={!selectedDocForSummary || isLoading}
-                style={primaryBtn(handleGenerateSummary, !selectedDocForSummary || isLoading, 'Generate', null)}
+                style={primaryBtn(!selectedDocForSummary || isLoading)}
                 onMouseEnter={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = c.brandDeepHover; }}
                 onMouseLeave={e => { if (selectedDocForSummary && !isLoading) e.currentTarget.style.background = c.brandDeep; }}
               >
@@ -178,25 +196,28 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <div style={{ background: c.bg, border: `0.5px solid ${c.border}`, borderRadius: 10, padding: '16px 18px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+
+              {/* Document A */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Document A — baseline
-                </label>
+                <label style={labelStyle}>Document A — baseline</label>
                 <select
                   style={selectStyle}
                   value={doc1Id}
-                  onChange={e => setDoc1Id(e.target.value)}
+                  onChange={e => handlePickA(e.target.value)}
                   onFocus={e  => (e.target.style.borderColor = c.brand)}
                   onBlur={e   => (e.target.style.borderColor = c.border)}
                 >
                   <option value="">— Select first document —</option>
-                  {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {documents.map(d => <option key={d.id} value={d.id}>{d.name}{d.sector ? ` — ${d.sector}` : ''}</option>)}
                 </select>
+                {docA?.sector && (
+                  <p style={{ fontSize: 11, color: c.textMuted, margin: '6px 0 0' }}>Sector: {docA.sector}</p>
+                )}
               </div>
+
+              {/* Document B — grouped same-sector first */}
               <div>
-                <label style={{ display: 'block', fontSize: 12, color: c.textMuted, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  Document B — comparison
-                </label>
+                <label style={labelStyle}>Document B — comparison</label>
                 <select
                   style={selectStyle}
                   value={doc2Id}
@@ -205,15 +226,45 @@ const AnalysisView: React.FC<AnalysisViewProps> = ({ documents }) => {
                   onBlur={e   => (e.target.style.borderColor = c.border)}
                 >
                   <option value="">— Select second document —</option>
-                  {documents.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {aSector ? (
+                    <>
+                      {sameSector.length > 0 && (
+                        <optgroup label={`Same sector — ${aSector}`}>
+                          {sameSector.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                        </optgroup>
+                      )}
+                      {otherSector.length > 0 && (
+                        <optgroup label="Other sectors">
+                          {otherSector.map(d => <option key={d.id} value={d.id}>{d.name}{d.sector ? ` — ${d.sector}` : ''}</option>)}
+                        </optgroup>
+                      )}
+                    </>
+                  ) : (
+                    bCandidates.map(d => <option key={d.id} value={d.id}>{d.name}{d.sector ? ` — ${d.sector}` : ''}</option>)
+                  )}
                 </select>
+                {docB?.sector && (
+                  <p style={{ fontSize: 11, color: c.textMuted, margin: '6px 0 0' }}>Sector: {docB.sector}</p>
+                )}
               </div>
             </div>
+
+            {/* Soft cross-sector warning (honey, not a block) */}
+            {sectorMismatch && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 14px', background: c.warnSurface, border: `0.5px solid ${c.warnBorder}`, borderRadius: 8, marginBottom: 14, color: c.warnFg, fontSize: 13, lineHeight: 1.55 }}>
+                <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+                <span>
+                  Different sectors ({docA?.sector} vs {docB?.sector}). Ratio-based comparisons like gross margin,
+                  inventory turnover, and risk factors may not be meaningful across sectors.
+                </span>
+              </div>
+            )}
+
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
               <button
                 onClick={handleCompare}
                 disabled={!doc1Id || !doc2Id || doc1Id === doc2Id || isLoading}
-                style={primaryBtn(handleCompare, !doc1Id || !doc2Id || doc1Id === doc2Id || isLoading, 'Compare', null)}
+                style={primaryBtn(!doc1Id || !doc2Id || doc1Id === doc2Id || isLoading)}
                 onMouseEnter={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = c.brandDeepHover; }}
                 onMouseLeave={e => { if (doc1Id && doc2Id && doc1Id !== doc2Id && !isLoading) e.currentTarget.style.background = c.brandDeep; }}
               >

@@ -6,7 +6,6 @@ import {
   HelpCircle,
 } from 'lucide-react';
 import { ViewState, Document } from './types';
-import { MOCK_DOCUMENTS } from './mockData';
 import { c, font } from './theme';
 import HelpView from './components/HelpView';
 import Dashboard from './components/Dashboard';
@@ -14,6 +13,7 @@ import DocumentManager from './components/DocumentManager';
 import ChatInterface from './components/ChatInterface';
 import AnalysisView from './components/AnalysisView';
 import SplashScreen from './components/SplashScreen';
+import GettingStarted from './components/GettingStarted';
 
 const NAV_ITEMS: { view: ViewState; label: string; icon: React.ReactNode }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
@@ -38,14 +38,38 @@ const FF = font.ui;
 const App: React.FC = () => {
   const [showSplash, setShowSplash]       = useState(true);
   const [currentView, setCurrentView]     = useState<ViewState>('dashboard');
-  const [documents, setDocuments]         = useState<Document[]>(MOCK_DOCUMENTS);
+  const [documents, setDocuments]         = useState<Document[]>([]);
   const [collapsed, setCollapsed]         = useState(false);
 
   const handleAddDocument    = (doc: Document) => setDocuments(prev => [doc, ...prev]);
   const handleRemoveDocument = (id: string)    => setDocuments(prev => prev.filter(d => d.id !== id));
 
+  // Entry point for the getting-started search. This is where the real flow goes:
+  // hit SEC EDGAR, fetch + parse the 10-K/10-Q, embed into RavenDB (showing the
+  // ingestion progress state). For now it optimistically adds a placeholder so the
+  // empty state is escapable during UI work — replace with the real pipeline call.
+  const handleAddCompany = (query: string) => {
+    const doc: Document = {
+      id: Date.now().toString(),
+      name: query,
+      uploadDate: new Date().toISOString().slice(0, 10),
+      size: '—',
+      content: '',
+      ticker: query.toUpperCase(),
+    };
+    handleAddDocument(doc);
+    setCurrentView('dashboard');
+  };
+
   if (showSplash) {
     return <SplashScreen onGetStarted={() => setShowSplash(false)} />;
+  }
+
+  // First-run / empty workspace: no companies loaded yet. Full-screen gate,
+  // same pattern as the splash — the app chrome (sidebar nav, company list) has
+  // nothing to show until at least one filing exists.
+  if (documents.length === 0) {
+    return <GettingStarted onAddCompany={handleAddCompany} />;
   }
 
   const renderView = () => {
