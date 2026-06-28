@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, FileText, ChevronDown } from 'lucide-react';
+import { Send, Bot, User, Loader2, FileText } from 'lucide-react';
 import { Document, ChatMessage } from '../types';
-import { askQuestion } from '../services/gemini';
+import { askFinSight } from '../services/gemini';
 import { c, font } from '../theme';
 
 interface ChatInterfaceProps {
@@ -20,6 +20,12 @@ const pillBase: React.CSSProperties = {
 
 const pillActive: React.CSSProperties   = { ...pillBase, background: c.brandTint, color: c.brand };
 const pillInactive: React.CSSProperties = { ...pillBase, background: c.surfaceAlt, color: c.textMuted };
+
+const sourceTag: React.CSSProperties = {
+  fontSize: 10, padding: '2px 7px', borderRadius: 6,
+  background: c.surfaceAlt, color: c.textMuted, fontFamily: font.ui,
+  whiteSpace: 'nowrap',
+};
 
 // ── component ────────────────────────────────────────────────────────────────
 
@@ -62,20 +68,26 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
     setIsLoading(true);
 
     try {
-      const docsToUse = selectedDocIds.length > 0
-        ? documents.filter(d => selectedDocIds.includes(d.id))
-        : documents;
+      // Scope retrieval when the selected docs all share one ticker / form.
+      // Retrieval itself happens server-side against RavenDB — no document text
+      // is sent from the browser anymore.
+      const selected = documents.filter(d => selectedDocIds.includes(d.id));
+      const tickers = Array.from(new Set(
+        selected.map(d => d.ticker).filter((t): t is string => Boolean(t))
+      ));
+      const forms = Array.from(new Set(
+        selected.map(d => d.form).filter((f): f is '10-K' | '10-Q' => Boolean(f))
+      ));
+      const ticker = tickers.length === 1 ? tickers[0] : undefined;
+      const form = forms.length === 1 ? forms[0] : undefined;
 
-      const context = docsToUse.map(d => `--- Document: ${d.name} ---\n${d.content}`).join('\n\n');
-
-      if (!context) throw new Error('No documents available. Please upload filings first.');
-
-      const answer = await askQuestion(userMsg.text, context);
+      const { answer, sources } = await askFinSight(userMsg.text, { ticker, form, k: 6 });
 
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
         text: answer,
+        sources,
         timestamp: new Date(),
       }]);
     } catch (error: any) {
@@ -231,6 +243,17 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
                     }}
                   >
                     {msg.text}
+
+                    {/* Source citations (assistant only) */}
+                    {!isUser && msg.sources && msg.sources.length > 0 && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, margin: '8px 0 0' }}>
+                        {msg.sources.map((s, i) => (
+                          <span key={`${s.source}-${s.chunk_index}-${i}`} style={sourceTag} title={s.source}>
+                            {s.ticker} {s.form} · #{s.chunk_index}
+                          </span>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Timestamp */}
                     <p style={{ fontSize: 10, color: isUser ? c.textMuted : c.textFaint, margin: '6px 0 0', textAlign: isUser ? 'right' : 'left' }}>

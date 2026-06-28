@@ -10,14 +10,19 @@ Design preserved from the Chroma version:
   - Deterministic document IDs (re-ingest = upsert, never duplicates)
   - CLI with `ingest` / `search` subcommands
 
-Embeddings are generated locally with gemini-embedding-001 via google-genai and
-stored on the document as a plain float array. RavenDB indexes pre-made numerical
-arrays directly (no transformation), so all generation control stays in this module.
+Embeddings are generated with gemini-embedding-001 via google-genai and stored on
+the document as a plain float array. RavenDB indexes pre-made numerical arrays
+directly (no transformation), so all generation control stays in this module.
+
+Auth (auto-detected by get_genai_client):
+  - GEMINI_API_KEY set      -> Gemini Developer API (key mode)
+  - else GOOGLE_CLOUD_PROJECT -> Vertex AI (ADC; run `gcloud auth application-default login`)
 
 Prerequisites:
   - A running RavenDB server (7.x) using the Corax search engine
   - pip install ravendb google-genai numpy
-  - Env: RAVENDB_URLS (comma-separated), RAVENDB_DATABASE, GEMINI_API_KEY
+  - Env: RAVENDB_URLS, RAVENDB_DATABASE, and either GEMINI_API_KEY
+    or (GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION) for Vertex mode
 """
 
 from __future__ import annotations
@@ -40,7 +45,11 @@ logger = logging.getLogger(__name__)
 
 RAVENDB_URLS = [u.strip() for u in os.getenv("RAVENDB_URLS", "http://127.0.0.1:8080").split(",")]
 RAVENDB_DATABASE = os.getenv("RAVENDB_DATABASE", "finsight")
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT")
+# "global" is not valid for the embedding model on Vertex; default to a region.
+GOOGLE_CLOUD_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))  # must stay consistent across all docs
@@ -67,11 +76,34 @@ def get_store() -> DocumentStore:
 
 
 def get_genai_client() -> genai.Client:
+    """
+    Build the shared google-genai client, auto-selecting the auth mode:
+
+      1. API key  -- if GEMINI_API_KEY is set (Gemini Developer API).
+      2. Vertex AI -- otherwise, using GOOGLE_CLOUD_PROJECT / GOOGLE_CLOUD_LOCATION
+         and Application Default Credentials. Run `gcloud auth application-default
+         login` once; no API key required.
+    """
     global _genai_client
     if _genai_client is None:
-        if not GEMINI_API_KEY:
-            raise RuntimeError("GEMINI_API_KEY is not set")
-        _genai_client = genai.Client(api_key=GEMINI_API_KEY)
+        if GEMINI_API_KEY:
+            _genai_client = genai.Client(api_key=GEMINI_API_KEY)
+            logger.info("google-genai client: API key mode")
+        elif GOOGLE_CLOUD_PROJECT:
+            _genai_client = genai.Client(
+                vertexai=True,
+                project=GOOGLE_CLOUD_PROJECT,
+                location=GOOGLE_CLOUD_LOCATION,
+            )
+            logger.info(
+                "google-genai client: Vertex mode (project=%s, location=%s)",
+                GOOGLE_CLOUD_PROJECT, GOOGLE_CLOUD_LOCATION,
+            )
+        else:
+            raise RuntimeError(
+                "No Gemini credentials found. Set GEMINI_API_KEY, or "
+                "GOOGLE_CLOUD_PROJECT (+ GOOGLE_CLOUD_LOCATION) for Vertex mode."
+            )
     return _genai_client
 
 

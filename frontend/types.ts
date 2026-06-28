@@ -3,7 +3,17 @@ export interface Document {
   name: string;
   uploadDate: string;
   size: string;
-  content: string; // Simulated extracted text for RAG
+  content: string;
+  ticker?: string;
+  form?: string;
+  sector?: string;   // GICS sector label, e.g. "Consumer Discretionary"
+}
+
+export interface ChatSource {
+  ticker: string;
+  form: string;
+  chunk_index: number;
+  source: string;
 }
 
 export interface ChatMessage {
@@ -11,6 +21,7 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   text: string;
   timestamp: Date;
+  sources?: ChatSource[]; // filings that grounded an assistant answer
 }
 
 export interface StockDataPoint {
