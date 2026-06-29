@@ -35,13 +35,23 @@ const TOPBAR_SUBTITLES: Record<ViewState, string> = {
 const FF = font.ui;
 
 const App: React.FC = () => {
-  const [showSplash, setShowSplash]       = useState(true);
-  const [currentView, setCurrentView]     = useState<ViewState>('dashboard');
-  const [documents, setDocuments]         = useState<Document[]>([]);
-  const [collapsed, setCollapsed]         = useState(false);
+  const [showSplash, setShowSplash]         = useState(true);
+  const [currentView, setCurrentView]       = useState<ViewState>('dashboard');
+  const [documents, setDocuments]           = useState<Document[]>([]);
+  const [collapsed, setCollapsed]           = useState(false);
+  // Which company the dashboard is showing. Keyed by ticker (or name fallback),
+  // uppercased — same key the sidebar company list uses.
+  const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
-  const handleAddDocument    = (doc: Document) => setDocuments(prev => [doc, ...prev]);
-  const handleRemoveDocument = (id: string)    => setDocuments(prev => prev.filter(d => d.id !== id));
+  const companyKey = (d: Document) => (d.ticker || d.name).toUpperCase();
+
+  // Adding a document selects it, so the dashboard follows whatever was just
+  // added (via getting-started, the Documents fetch, or an upload).
+  const handleAddDocument = (doc: Document) => {
+    setDocuments(prev => [doc, ...prev]);
+    setSelectedTicker(companyKey(doc));
+  };
+  const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id));
 
   // Companies derived from loaded documents (deduped by ticker), so the sidebar
   // reflects what's actually ingested rather than a hardcoded list.
@@ -56,7 +66,13 @@ const App: React.FC = () => {
     return out;
   }, [documents]);
 
-  const activeCompanyKey = (documents[0]?.ticker || documents[0]?.name || '').toUpperCase();
+  // Keep the selection valid: if nothing is selected yet, or the selected
+  // company was deleted, fall back to the most recent filing (or clear it).
+  React.useEffect(() => {
+    if (documents.length === 0) { setSelectedTicker(null); return; }
+    const exists = selectedTicker && documents.some(d => companyKey(d) === selectedTicker);
+    if (!exists) setSelectedTicker(companyKey(documents[0]));
+  }, [documents, selectedTicker]);
 
   // Entry point for the getting-started search:
   // 1. Add an optimistic placeholder so the dashboard appears immediately.
@@ -114,12 +130,12 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return <Dashboard documents={documents} />;
-      case 'documents': return <DocumentManager documents={documents} onAddDocument={handleAddDocument} onRemoveDocument={handleRemoveDocument} />;
+      case 'dashboard': return <Dashboard documents={documents} selectedTicker={selectedTicker} />;
+      case 'documents': return <DocumentManager documents={documents} onAddDocument={handleAddDocument} onRemoveDocument={handleRemoveDocument} onFetched={() => setCurrentView('dashboard')} />;
       case 'chat':      return <ChatInterface documents={documents} />;
       case 'analysis':  return <AnalysisView documents={documents} />;
       case 'help':      return <HelpView />;
-      default:          return <Dashboard documents={documents} />;
+      default:          return <Dashboard documents={documents} selectedTicker={selectedTicker} />;
     }
   };
 
@@ -208,11 +224,11 @@ const App: React.FC = () => {
             </p>
           )}
           {companies.map(({ key, label }) => {
-            const active = key === activeCompanyKey && currentView === 'dashboard';
+            const active = key === selectedTicker && currentView === 'dashboard';
             return (
               <button
                 key={key}
-                onClick={() => setCurrentView('dashboard')}
+                onClick={() => { setSelectedTicker(key); setCurrentView('dashboard'); }}
                 title={collapsed ? label : undefined}
                 style={{
                   display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6,
