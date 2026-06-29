@@ -3,62 +3,11 @@ import { Building2, LineChart, Lock } from 'lucide-react';
 import { Document } from '../types';
 import { c, font } from '../theme';
 
-// --- Shape of the extractor's `metrics` object (backend/data_extract/extractor.py).
-// All fields optional: XBRL extraction may not resolve every concept for every filer.
-
-export interface IncomeStatement {
-  total_revenue_millions?: number;
-  cost_of_revenue_millions?: number;
-  gross_margin_millions?: number;
-  gross_margin_pct?: number;
-  rd_expense_millions?: number;
-  sga_expense_millions?: number;
-  total_opex_millions?: number;
-  operating_income_millions?: number;
-  income_tax_millions?: number;
-  net_income_millions?: number;
-  eps_basic?: number;
-  eps_diluted?: number;
-  effective_tax_rate_pct?: number;
-}
-
-export interface BalanceSheet {
-  cash_and_equivalents_millions?: number;
-  total_current_assets_millions?: number;
-  total_assets_millions?: number;
-  total_current_liabilities?: number;
-  total_liabilities_millions?: number;
-  shareholders_equity_millions?: number;
-  long_term_debt_millions?: number;
-  retained_earnings_millions?: number;
-  ppe_net_millions?: number;
-  inventories_millions?: number;
-  accounts_receivable_millions?: number;
-  working_capital_millions?: number;
-}
-
-export interface CashFlow {
-  operating_cash_flow_millions?: number;
-  investing_cash_flow_millions?: number;
-  financing_cash_flow_millions?: number;
-  capex_millions?: number;
-  dividends_paid_millions?: number;
-  share_repurchases_millions?: number;
-  depreciation_amortization?: number;
-  share_based_comp_millions?: number;
-  free_cash_flow_millions?: number;
-}
-
-export interface FilingMetrics {
-  income_statement?: IncomeStatement;
-  balance_sheet?: BalanceSheet;
-  cash_flow?: CashFlow;
-  computed_ratios?: Record<string, number>;
-  qualitative?: Record<string, unknown>;
-}
-
 interface DashboardProps {
   documents: Document[];
+  // Ticker (or name) key of the company to show, uppercased. When omitted,
+  // falls back to the most recently added filing.
+  selectedTicker?: string | null;
 }
 
 // --- Formatting helpers (values arrive in millions of USD) -------------------
@@ -111,9 +60,13 @@ const BlankPanel: React.FC<{ title: string; note: string; icon: React.ReactNode 
 
 // --- Component ---------------------------------------------------------------
 
-const Dashboard: React.FC<DashboardProps> = ({ documents }) => {
-  // Active company = most recently added filing (handleAddDocument prepends).
-  const doc = documents[0];
+const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
+  // Active company = the selected one (by ticker/name key), else most recent.
+  const key = (d: Document) => (d.ticker || d.name).toUpperCase();
+  const doc = (selectedTicker
+    ? documents.find(d => key(d) === selectedTicker.toUpperCase())
+    : undefined) ?? documents[0];
+
   const ticker = doc?.ticker || doc?.name?.match(/^([A-Za-z]{1,5})/)?.[1]?.toUpperCase();
   const name = doc?.name ?? 'No company selected';
   const meta = [doc?.form, doc?.sector, doc?.uploadDate && `added ${doc.uploadDate}`].filter(Boolean).join(' · ');

@@ -1,12 +1,18 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud, FileText, Trash2, CheckCircle, Loader2 } from 'lucide-react';
+import { UploadCloud, FileText, Trash2, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
 import { Document } from '../types';
 import { c, font } from '../theme';
+import { extractCompany } from '../services/gemini';
 
 interface DocumentManagerProps {
   documents: Document[];
   onAddDocument: (doc: Document) => void;
   onRemoveDocument: (id: string) => void;
+  // Optional: called after a successful EDGAR fetch. Wire to a view switch in
+  // App (e.g. () => setCurrentView('dashboard')) to jump to the populated
+  // dashboard automatically. If omitted, the new filing simply appears in the
+  // list and the dashboard shows it on next navigation.
+  onFetched?: () => void;
 }
 
 const FF = font.ui;
@@ -28,12 +34,13 @@ const selectStyle: React.CSSProperties = {
   cursor: 'pointer', flexShrink: 0,
 };
 
-const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument }) => {
+const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument, onFetched }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading]   = useState(false);
   const [fetching, setFetching]     = useState(false);
   const [ticker, setTicker]         = useState('');
   const [form, setForm]             = useState<Form>('10-K');
+  const [error, setError]           = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const busy = uploading || fetching;
@@ -62,23 +69,33 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     if (e.target.files?.[0]) simulateUpload(e.target.files[0]);
   };
 
-  const handleFetchEdgar = () => {
+  // Real EDGAR fetch: hit the backend /extract pipeline and store the structured
+  // metrics on the document so the dashboard can render them.
+  const handleFetchEdgar = async () => {
     const t = ticker.trim().toUpperCase();
     if (!t || busy) return;
+    setError(null);
     setFetching(true);
-    setTimeout(() => {
+    try {
+      const data = await extractCompany(t, form);
       onAddDocument({
         id: `doc-${Date.now()}`,
-        name: `${t} ${form}`,
+        name: `${t} ${data.form}`,
         uploadDate: new Date().toISOString().split('T')[0],
-        size: '2.4 MB',
-        content: `Simulated ${form} content for ${t} fetched from SEC EDGAR.`,
+        size: data.char_count ? `${Math.round(data.char_count / 1024)} KB` : '—',
+        content: '',
         ticker: t,
-        form,
+        form: data.form,
+        metrics: data.metrics,
+        ...(data.sector ? { sector: data.sector } : {}),
       });
       setTicker('');
+      onFetched?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Fetch failed. Is the backend running?');
+    } finally {
       setFetching(false);
-    }, 1800);
+    }
   };
 
   return (
@@ -101,7 +118,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           <input
             type="text"
             value={ticker}
-            onChange={e => setTicker(e.target.value)}
+            onChange={e => { setTicker(e.target.value); if (error) setError(null); }}
             onKeyDown={e => e.key === 'Enter' && handleFetchEdgar()}
             placeholder="Company name or ticker"
             style={inputStyle}
@@ -137,6 +154,19 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
               : 'Fetch filing'}
           </button>
         </div>
+
+        {/* Fetch error (honey warn tokens — never red, which is reserved for financials) */}
+        {error && (
+          <div style={{
+            display: 'flex', alignItems: 'flex-start', gap: 8,
+            marginTop: 10, padding: '8px 12px', borderRadius: 7,
+            background: c.warnSurface, border: `0.5px solid ${c.warnBorder}`,
+            fontSize: 12, color: c.warnFg, lineHeight: 1.5,
+          }}>
+            <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            <span>{error}</span>
+          </div>
+        )}
       </div>
 
       {/* Divider */}
