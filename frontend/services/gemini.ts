@@ -1,4 +1,4 @@
-import { ChatSource } from '../types';
+import { ChatSource, FilingMetrics } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? 'http://localhost:8000';
 
@@ -64,4 +64,28 @@ export async function compareDocuments(
   }
   const data = (await res.json()) as { comparison: string };
   return data.comparison;
+}
+
+// Extraction: ticker -> structured XBRL data (income statement, balance sheet,
+// cash flow, ratios) from the FastAPI /extract endpoint, which runs the EDGAR
+// + companyfacts pipeline (backend/data_extract/extractor.py).
+export interface ExtractResponse {
+  ticker: string;
+  form: string;
+  filing_date: string;
+  accession_number: string;
+  source_url: string;
+  char_count: number;
+  metrics: FilingMetrics;
+  sections?: Record<string, unknown>;
+  sector?: string; // present only if the backend resolves SIC -> sector
+}
+
+export async function extractCompany(ticker: string, form: '10-K' | '10-Q' = '10-K'): Promise<ExtractResponse> {
+  const res = await fetch(`${API_BASE}/extract/${encodeURIComponent(ticker)}?form=${form}`);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`Extract failed (${res.status}): ${msg}`);
+  }
+  return (await res.json()) as ExtractResponse;
 }
