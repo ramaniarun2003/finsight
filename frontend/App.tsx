@@ -14,6 +14,7 @@ import ChatInterface from './components/ChatInterface';
 import AnalysisView from './components/AnalysisView';
 import SplashScreen from './components/SplashScreen';
 import GettingStarted from './components/GettingStarted';
+import { extractCompany } from './services/gemini';
 
 const NAV_ITEMS: { view: ViewState; label: string; icon: React.ReactNode }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
@@ -22,8 +23,6 @@ const NAV_ITEMS: { view: ViewState; label: string; icon: React.ReactNode }[] = [
   { view: 'analysis',  label: 'Analysis',   icon: <BarChart3 size={17} /> },
   { view: 'help', label: 'Help', icon: <HelpCircle size={17} /> },
 ];
-
-const COMPANIES = ['Gap Inc. (GPS)', 'PVH Corp (PVH)', 'AEO'];
 
 const TOPBAR_SUBTITLES: Record<ViewState, string> = {
   dashboard: 'Financial research workspace',
@@ -44,21 +43,62 @@ const App: React.FC = () => {
   const handleAddDocument    = (doc: Document) => setDocuments(prev => [doc, ...prev]);
   const handleRemoveDocument = (id: string)    => setDocuments(prev => prev.filter(d => d.id !== id));
 
-  // Entry point for the getting-started search. This is where the real flow goes:
-  // hit SEC EDGAR, fetch + parse the 10-K/10-Q, embed into RavenDB (showing the
-  // ingestion progress state). For now it optimistically adds a placeholder so the
-  // empty state is escapable during UI work — replace with the real pipeline call.
-  const handleAddCompany = (query: string) => {
-    const doc: Document = {
-      id: Date.now().toString(),
-      name: query,
+  // Companies derived from loaded documents (deduped by ticker), so the sidebar
+  // reflects what's actually ingested rather than a hardcoded list.
+  const companies = React.useMemo(() => {
+    const out: { key: string; label: string }[] = [];
+    const seen = new Set<string>();
+    for (const d of documents) {
+      const label = d.ticker || d.name;
+      const key = label.toUpperCase();
+      if (!seen.has(key)) { seen.add(key); out.push({ key, label }); }
+    }
+    return out;
+  }, [documents]);
+
+  const activeCompanyKey = (documents[0]?.ticker || documents[0]?.name || '').toUpperCase();
+
+  // Entry point for the getting-started search:
+  // 1. Add an optimistic placeholder so the dashboard appears immediately.
+  // 2. Call /extract, which runs the EDGAR + companyfacts pipeline.
+  // 3. Replace the placeholder with the real metrics-filled document.
+  // While step 2 is in flight, doc.metrics is undefined, so the dashboard shows
+  // its "fundamentals will appear once fetched" state — that's the loading state.
+  const handleAddCompany = async (query: string) => {
+    const ticker = query.trim().toUpperCase();
+    if (!ticker) return;
+
+    const id = Date.now().toString();
+    handleAddDocument({
+      id,
+      name: ticker,
       uploadDate: new Date().toISOString().slice(0, 10),
       size: '—',
       content: '',
-      ticker: query.toUpperCase(),
-    };
-    handleAddDocument(doc);
+      ticker,
+    });
     setCurrentView('dashboard');
+
+    try {
+      const data = await extractCompany(ticker, '10-K');
+      setDocuments(prev =>
+        prev.map(d =>
+          d.id === id
+            ? {
+                ...d,
+                name: data.ticker || ticker,
+                form: data.form,
+                metrics: data.metrics,
+                ...(data.sector ? { sector: data.sector } : {}),
+              }
+            : d,
+        ),
+      );
+    } catch (err) {
+      // Leave the placeholder in place; the dashboard keeps showing the
+      // "awaiting data" state. Surface the failure for now via the console.
+      console.error(`Failed to extract ${ticker}:`, err);
+    }
   };
 
   if (showSplash) {
@@ -74,12 +114,12 @@ const App: React.FC = () => {
 
   const renderView = () => {
     switch (currentView) {
-      case 'dashboard': return <Dashboard />;
+      case 'dashboard': return <Dashboard documents={documents} />;
       case 'documents': return <DocumentManager documents={documents} onAddDocument={handleAddDocument} onRemoveDocument={handleRemoveDocument} />;
       case 'chat':      return <ChatInterface documents={documents} />;
       case 'analysis':  return <AnalysisView documents={documents} />;
       case 'help':      return <HelpView />;
-      default:          return <Dashboard />;
+      default:          return <Dashboard documents={documents} />;
     }
   };
 
@@ -161,25 +201,37 @@ const App: React.FC = () => {
             );
           })}
 
-          {/* Companies */}
-          {!collapsed && (
+          {/* Companies — derived from loaded documents */}
+          {!collapsed && companies.length > 0 && (
             <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', padding: '12px 8px 4px', margin: 0, whiteSpace: 'nowrap' }}>
               Companies
             </p>
           )}
-          {COMPANIES.map(name => (
-            <button
-              key={name}
-              title={collapsed ? name : undefined}
-              style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6, fontSize: 12, color: c.textMuted, background: 'transparent', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', whiteSpace: 'nowrap', fontFamily: FF }}
-              onMouseEnter={e => { e.currentTarget.style.background = c.hover; e.currentTarget.style.color = c.text; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = c.textMuted; }}
-            >
-              <span style={{ flexShrink: 0, minWidth: 17, display: 'flex' }}><Building2 size={16} /></span>
-              {!collapsed && <span>{name}</span>}
-            </button>
-          ))}
+          {companies.map(({ key, label }) => {
+            const active = key === activeCompanyKey && currentView === 'dashboard';
+            return (
+              <button
+                key={key}
+                onClick={() => setCurrentView('dashboard')}
+                title={collapsed ? label : undefined}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6,
+                  fontSize: 12, fontWeight: active ? 500 : 400,
+                  color: active ? c.brand : c.textMuted,
+                  background: active ? c.brandTint : 'transparent',
+                  border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', whiteSpace: 'nowrap', fontFamily: FF,
+                  transition: 'background 0.1s, color 0.1s',
+                }}
+                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = c.hover; e.currentTarget.style.color = c.text; } }}
+                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = c.textMuted; } }}
+              >
+                <span style={{ flexShrink: 0, minWidth: 17, display: 'flex' }}><Building2 size={16} /></span>
+                {!collapsed && <span>{label}</span>}
+              </button>
+            );
+          })}
           <button
+            onClick={() => setCurrentView('documents')}
             title={collapsed ? 'Add company' : undefined}
             style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6, fontSize: 12, color: c.textFaint, background: 'transparent', border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', whiteSpace: 'nowrap', fontFamily: FF }}
             onMouseEnter={e => { e.currentTarget.style.background = c.hover; e.currentTarget.style.color = c.textMuted; }}
