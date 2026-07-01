@@ -3,6 +3,7 @@ import { UploadCloud, FileText, Trash2, CheckCircle, Loader2, AlertTriangle } fr
 import { Document } from '../types';
 import { c, font } from '../theme';
 import { extractCompany } from '../services/gemini';
+import CompanyLogo from './CompanyLogo';
 
 interface DocumentManagerProps {
   documents: Document[];
@@ -267,16 +268,8 @@ const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> =
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      {/* Ticker badge, or a file icon when there's no ticker */}
-      {ticker ? (
-        <div style={{ width: 36, height: 36, borderRadius: 7, background: c.brandTint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <span style={{ fontSize: 11, fontWeight: 500, color: c.brand }}>{ticker}</span>
-        </div>
-      ) : (
-        <div style={{ width: 36, height: 36, borderRadius: 7, background: c.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-          <FileText size={16} color={c.textMuted} />
-        </div>
-      )}
+      {/* Company logo, or the ticker/file fallback when no logo resolves */}
+      <CompanyLogo ticker={ticker} size={36} radius={7} />
 
       {/* Info */}
       <div style={{ flex: 1, minWidth: 0 }}>

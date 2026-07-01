@@ -1,7 +1,12 @@
-import React from 'react';
-import { Building2, LineChart, Lock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { LineChart as LineChartIcon, Loader2 } from 'lucide-react';
+import {
+  LineChart as RechartsLineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+} from 'recharts';
 import { Document } from '../types';
 import { c, font } from '../theme';
+import CompanyLogo from './CompanyLogo';
+import { fetchMarketData, MarketResponse } from '../services/gemini';
 
 interface DashboardProps {
   documents: Document[];
@@ -10,8 +15,9 @@ interface DashboardProps {
   selectedTicker?: string | null;
 }
 
-// --- Formatting helpers (values arrive in millions of USD) -------------------
+// --- Formatting helpers ------------------------------------------------------
 
+// Filing values arrive in millions of USD.
 const fmtUSD = (m?: number): string => {
   if (m == null) return '—';
   const a = Math.abs(m);
@@ -20,8 +26,30 @@ const fmtUSD = (m?: number): string => {
   return `$${Math.round(m).toLocaleString()}M`;
 };
 
-const fmtPct = (p?: number): string => (p == null ? '—' : `${p.toFixed(1)}%`);
-const fmtEps = (e?: number): string => (e == null ? '—' : `$${e.toFixed(2)}`);
+// Raw USD (market cap, etc.).
+const fmtMoney = (n?: number): string => {
+  if (n == null) return '—';
+  const a = Math.abs(n);
+  if (a >= 1e12) return `$${(n / 1e12).toFixed(2)}T`;
+  if (a >= 1e9)  return `$${(n / 1e9).toFixed(2)}B`;
+  if (a >= 1e6)  return `$${(n / 1e6).toFixed(1)}M`;
+  return `$${Math.round(n).toLocaleString()}`;
+};
+
+// Counts (volume).
+const fmtNum = (n?: number): string => {
+  if (n == null) return '—';
+  const a = Math.abs(n);
+  if (a >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
+  if (a >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (a >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
+  return `${Math.round(n)}`;
+};
+
+const fmtPrice = (n?: number): string => (n == null ? '—' : `$${n.toFixed(2)}`);
+const fmtPct   = (p?: number): string => (p == null ? '—' : `${p.toFixed(1)}%`);
+const fmtEps   = (e?: number): string => (e == null ? '—' : `$${e.toFixed(2)}`);
+const fmtRatio = (r?: number): string => (r == null ? '—' : r.toFixed(1));
 
 const pctOf = (part?: number, whole?: number): number | undefined =>
   part != null && whole ? (part / whole) * 100 : undefined;
@@ -39,6 +67,11 @@ const lbl: React.CSSProperties = {
 };
 const bigNum: React.CSSProperties = { fontSize: 22, fontWeight: 500, color: c.text, margin: 0 };
 const sub: React.CSSProperties = { fontSize: 12, color: c.textMuted, margin: '3px 0 0' };
+const panelTitle: React.CSSProperties = { fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 14px' };
+const centered: React.CSSProperties = {
+  height: 150, display: 'flex', flexDirection: 'column', alignItems: 'center',
+  justifyContent: 'center', gap: 8, color: c.textFaint, fontSize: 12, textAlign: 'center',
+};
 
 const MetricCard: React.FC<{ label: string; value: string; note?: string }> = ({ label, value, note }) => (
   <div style={card}>
@@ -48,13 +81,11 @@ const MetricCard: React.FC<{ label: string; value: string; note?: string }> = ({
   </div>
 );
 
-const BlankPanel: React.FC<{ title: string; note: string; icon: React.ReactNode }> = ({ title, note, icon }) => (
-  <div style={panel}>
-    <p style={{ fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 14px' }}>{title}</p>
-    <div style={{ height: 150, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: c.textFaint }}>
-      {icon}
-      <p style={{ fontSize: 12, color: c.textFaint, margin: 0, textAlign: 'center', maxWidth: 240, lineHeight: 1.5 }}>{note}</p>
-    </div>
+// Small label/value row used inside the market snapshot.
+const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '5px 0', borderBottom: `0.5px solid ${c.borderFaint}` }}>
+    <span style={{ color: c.textMuted }}>{label}</span>
+    <span style={{ color: c.text, fontWeight: 500 }}>{value}</span>
   </div>
 );
 
@@ -62,10 +93,12 @@ const BlankPanel: React.FC<{ title: string; note: string; icon: React.ReactNode 
 
 const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
   // Active company = the selected one (by ticker/name key), else most recent.
+  // Among that company's filings, prefer the annual 10-K (fuller data) over a 10-Q.
   const key = (d: Document) => (d.ticker || d.name).toUpperCase();
-  const doc = (selectedTicker
-    ? documents.find(d => key(d) === selectedTicker.toUpperCase())
-    : undefined) ?? documents[0];
+  const forTicker = selectedTicker
+    ? documents.filter(d => key(d) === selectedTicker.toUpperCase())
+    : documents;
+  const doc = forTicker.find(d => d.form === '10-K') ?? forTicker[0] ?? documents[0];
 
   const ticker = doc?.ticker || doc?.name?.match(/^([A-Za-z]{1,5})/)?.[1]?.toUpperCase();
   const name = doc?.name ?? 'No company selected';
@@ -90,20 +123,30 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
     { name: 'FCF margin',       value: fcfPct,   color: c.accent },
   ].filter(x => x.value != null)) as { name: string; value: number; color: string }[];
 
+  // --- Market data (yfinance via /market), fetched per selected company ------
+  const [market, setMarket] = useState<{ data: MarketResponse | null; loading: boolean; error: string | null }>(
+    { data: null, loading: false, error: null }
+  );
+
+  useEffect(() => {
+    if (!ticker) { setMarket({ data: null, loading: false, error: null }); return; }
+    let cancelled = false;
+    setMarket({ data: null, loading: true, error: null });
+    fetchMarketData(ticker, '1y')
+      .then(d => { if (!cancelled) setMarket({ data: d, loading: false, error: null }); })
+      .catch(e => { if (!cancelled) setMarket({ data: null, loading: false, error: e instanceof Error ? e.message : 'Market data unavailable' }); });
+    return () => { cancelled = true; };
+  }, [ticker]);
+
+  const snap = market.data?.snapshot;
+  const change = snap?.change_pct;
+
   return (
     <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: font.ui }}>
 
       {/* Header — real identity */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-        {ticker ? (
-          <div style={{ width: 42, height: 42, borderRadius: 8, background: c.brandTint, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <span style={{ fontSize: 13, fontWeight: 500, color: c.brand }}>{ticker}</span>
-          </div>
-        ) : (
-          <div style={{ width: 42, height: 42, borderRadius: 8, background: c.surfaceAlt, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-            <Building2 size={18} color={c.textMuted} />
-          </div>
-        )}
+        <CompanyLogo ticker={ticker} size={42} radius={8} />
         <div>
           <p style={{ fontSize: 16, fontWeight: 500, color: c.text, margin: 0 }}>{name}</p>
           <p style={{ fontSize: 12, color: c.textMuted, margin: 0 }}>{meta || 'Financial research workspace'}</p>
@@ -112,7 +155,7 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
 
       {!m && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: c.surface, borderRadius: 8, marginBottom: 16, fontSize: 13, color: c.textMuted }}>
-          <LineChart size={15} />
+          <LineChartIcon size={15} />
           Filing fundamentals will appear once this company's XBRL data is fetched from EDGAR.
         </div>
       )}
@@ -129,11 +172,11 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
         <MetricCard label="Cash & equiv."    value={fmtUSD(bal?.cash_and_equivalents_millions)} />
       </div>
 
-      {/* Margin breakdown (filled) + Market snapshot (blank) */}
+      {/* Margin breakdown (filled) + Market snapshot (live) */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
 
         <div style={panel}>
-          <p style={{ fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 14px' }}>Margin breakdown</p>
+          <p style={panelTitle}>Margin breakdown</p>
           {margins.length > 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               {margins.map(({ name: n, value, color }) => (
@@ -149,26 +192,84 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
               ))}
             </div>
           ) : (
-            <div style={{ height: 150, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: c.textFaint }}>
-              Margin data not available for this filing.
-            </div>
+            <div style={centered}>Margin data not available for this filing.</div>
           )}
         </div>
 
-        <BlankPanel
-          title="Market snapshot"
-          icon={<Lock size={18} color={c.textFaint} />}
-          note="Price, market cap, and volume aren't in the filing. Connect a market-data feed (yfinance) to populate these."
-        />
+        {/* Market snapshot — live from yfinance */}
+        <div style={panel}>
+          <p style={panelTitle}>Market snapshot</p>
+          {market.loading ? (
+            <div style={centered}>
+              <Loader2 size={18} color={c.textFaint} style={{ animation: 'spin 1s linear infinite' }} />
+              Loading market data…
+            </div>
+          ) : snap ? (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: 26, fontWeight: 600, color: c.text }}>{fmtPrice(snap.price)}</span>
+                {change != null && (
+                  <span style={{ fontSize: 13, fontWeight: 500, color: change >= 0 ? c.pos : c.neg }}>
+                    {change >= 0 ? '▲' : '▼'} {Math.abs(change).toFixed(2)}%
+                  </span>
+                )}
+              </div>
+              <Stat label="Market cap"  value={fmtMoney(snap.market_cap)} />
+              <Stat label="Volume"      value={fmtNum(snap.volume)} />
+              <Stat label="52W high"    value={fmtPrice(snap.high_52w)} />
+              <Stat label="52W low"     value={fmtPrice(snap.low_52w)} />
+              <Stat label="P/E (ttm)"   value={fmtRatio(snap.pe_ratio)} />
+            </div>
+          ) : (
+            <div style={centered}>{market.error ?? 'Market data unavailable.'}</div>
+          )}
+        </div>
       </div>
 
-      {/* Price history (blank — market data) */}
-      <BlankPanel
-        title={`${ticker ?? 'Price'} price history`}
-        icon={<LineChart size={18} color={c.textFaint} />}
-        note="Price history requires a market-data feed. The filing provides fundamentals, not daily quotes."
-      />
+      {/* Price history — live from yfinance */}
+      <div style={panel}>
+        <p style={panelTitle}>{ticker ?? 'Price'} price history</p>
+        {market.loading ? (
+          <div style={centered}>
+            <Loader2 size={18} color={c.textFaint} style={{ animation: 'spin 1s linear infinite' }} />
+            Loading price history…
+          </div>
+        ) : market.data && market.data.history.length > 0 ? (
+          <ResponsiveContainer width="100%" height={240}>
+            <RechartsLineChart data={market.data.history} margin={{ top: 5, right: 12, left: 0, bottom: 0 }}>
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 11, fill: c.textFaint }}
+                tickLine={false}
+                axisLine={{ stroke: c.border }}
+                minTickGap={48}
+                tickFormatter={(d) => String(d).slice(0, 7)}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: c.textFaint }}
+                tickLine={false}
+                axisLine={{ stroke: c.border }}
+                width={52}
+                domain={['auto', 'auto']}
+                tickFormatter={(v) => `$${Number(v).toFixed(0)}`}
+              />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: `0.5px solid ${c.border}`, fontFamily: font.ui }}
+                labelStyle={{ color: c.textMuted }}
+                formatter={(v) => [`$${Number(v).toFixed(2)}`, 'Close']}
+              />
+              <Line type="monotone" dataKey="close" stroke={c.brand} strokeWidth={2} dot={false} />
+            </RechartsLineChart>
+          </ResponsiveContainer>
+        ) : (
+          <div style={centered}>
+            <LineChartIcon size={18} color={c.textFaint} />
+            {market.error ?? 'Price history unavailable.'}
+          </div>
+        )}
+      </div>
 
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
