@@ -4,7 +4,7 @@ backend/data_extract/embeddings.py
 RavenDB-backed embedding ingest + semantic search for FinSight.
 
 Design preserved from the Chroma version:
-  - Paragraph-aware chunking
+  - Paragraph-aware chunking with single-newline fallback for SEC filing prose
   - Explicit L2 normalization of vectors
   - Task-type asymmetry (RETRIEVAL_DOCUMENT for ingest, RETRIEVAL_QUERY for search)
   - Deterministic document IDs (re-ingest = upsert, never duplicates)
@@ -32,6 +32,7 @@ import hashlib
 import logging
 import os
 import re
+import time
 from typing import Iterable, Optional
 
 import numpy as np
@@ -55,8 +56,11 @@ EMBED_MODEL = "gemini-embedding-001"
 EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))  # must stay consistent across all docs
 COLLECTION = "FilingChunks"
 
-# Embedding batch size (Gemini accepts batched contents)
-EMBED_BATCH = 64
+# Batch size for embed_content calls. Small value (8) avoids per-minute token
+# quota spikes on the free tier while still saving round-trips vs. one-at-a-time.
+EMBED_BATCH = int(os.getenv("EMBED_BATCH", "8"))
+# Seconds to sleep between embedding batches (prevents 429 on free-tier RPM cap).
+EMBED_BATCH_DELAY = float(os.getenv("EMBED_BATCH_DELAY", "1.0"))
 
 # --- Singletons -------------------------------------------------------------
 
@@ -145,49 +149,106 @@ def _normalize(vec: Iterable[float]) -> list:
 
 
 def embed_texts(texts: list[str], task_type: str) -> list[list]:
-    """Embed a list of texts with the given task type, normalized."""
+    """
+    Embed a list of texts with the given task type, normalized.
+
+    Uses small batches (EMBED_BATCH) with inter-batch sleep to pace the free-
+    tier quota. On 429 RESOURCE_EXHAUSTED (per-minute RPM cap), waits 62s and
+    retries up to 3 times — the API returns retryDelay ~60s on rate limits.
+    """
     client = get_genai_client()
     out: list[list] = []
-    for start in range(0, len(texts), EMBED_BATCH):
+    for i, start in enumerate(range(0, len(texts), EMBED_BATCH)):
+        if i > 0 and EMBED_BATCH_DELAY > 0:
+            time.sleep(EMBED_BATCH_DELAY)
         batch = texts[start:start + EMBED_BATCH]
-        resp = client.models.embed_content(
-            model=EMBED_MODEL,
-            contents=batch,
-            config=types.EmbedContentConfig(
-                task_type=task_type,
-                output_dimensionality=EMBED_DIM,
-            ),
-        )
-        out.extend(_normalize(e.values) for e in resp.embeddings)
+
+        for attempt in range(4):  # up to 3 retries
+            try:
+                resp = client.models.embed_content(
+                    model=EMBED_MODEL,
+                    contents=batch,
+                    config=types.EmbedContentConfig(
+                        task_type=task_type,
+                        output_dimensionality=EMBED_DIM,
+                    ),
+                )
+                out.extend(_normalize(e.values) for e in resp.embeddings)
+                break
+            except Exception as e:
+                if ("429" in str(e) or "RESOURCE_EXHAUSTED" in str(e)) and attempt < 3:
+                    wait = 62 + attempt * 10  # 62s, 72s, 82s
+                    logger.warning(
+                        "Embedding 429 on batch %d/%d (attempt %d), waiting %ds…",
+                        i + 1, (len(texts) + EMBED_BATCH - 1) // EMBED_BATCH,
+                        attempt + 1, wait,
+                    )
+                    time.sleep(wait)
+                else:
+                    raise
     return out
 
 
 # --- Chunking ---------------------------------------------------------------
 
-_PARA_SPLIT = re.compile(r"\n\s*\n+")
+_DOUBLE_NL = re.compile(r"\n\s*\n+")
+_SINGLE_NL = re.compile(r"\n")
 
 
 def chunk_text(text: str, max_chars: int = 1800, overlap_paras: int = 1) -> list[str]:
     """
-    Paragraph-aware chunking: group whole paragraphs up to a soft char budget,
-    carrying a small paragraph overlap between consecutive chunks for context.
+    Paragraph-aware chunking tuned for SEC filing prose.
+
+    SEC filings extracted from HTML typically have only single newlines between
+    sentences/paragraphs (not double newlines), so the splitter falls back from
+    double-newline to single-newline splitting when paragraphs would be too large.
+    Any line still exceeding max_chars is then split further at word boundaries.
+
+    Consecutive small items are grouped up to the max_chars budget, with one
+    unit of overlap between consecutive chunks for context continuity.
     """
-    paras = [p.strip() for p in _PARA_SPLIT.split(text) if p.strip()]
+    # 1. Try double-newline split (proper paragraphs)
+    raw = [p.strip() for p in _DOUBLE_NL.split(text) if p.strip()]
+
+    # If every "paragraph" is huge (no blank lines), fall back to single newlines
+    if raw and max(len(p) for p in raw) > max_chars * 2:
+        raw = [p.strip() for p in _SINGLE_NL.split(text) if p.strip()]
+
+    # 2. Sub-split any line that still exceeds max_chars at word boundaries
+    paras: list[str] = []
+    for p in raw:
+        if len(p) <= max_chars:
+            paras.append(p)
+        else:
+            words = p.split()
+            buf: list[str] = []
+            size = 0
+            for word in words:
+                if size + len(word) + 1 > max_chars and buf:
+                    paras.append(" ".join(buf))
+                    buf = []
+                    size = 0
+                buf.append(word)
+                size += len(word) + 1
+            if buf:
+                paras.append(" ".join(buf))
+
+    # 3. Group paras into chunks with overlap
     chunks: list[str] = []
-    buf: list[str] = []
+    buf_paras: list[str] = []
     size = 0
 
     for para in paras:
-        if buf and size + len(para) > max_chars:
-            chunks.append("\n\n".join(buf))
-            # start next buffer with a paragraph of overlap
-            buf = buf[-overlap_paras:] if overlap_paras else []
-            size = sum(len(p) for p in buf)
-        buf.append(para)
+        if buf_paras and size + len(para) > max_chars:
+            chunks.append("\n\n".join(buf_paras))
+            buf_paras = buf_paras[-overlap_paras:] if overlap_paras else []
+            size = sum(len(p) for p in buf_paras)
+        buf_paras.append(para)
         size += len(para)
 
-    if buf:
-        chunks.append("\n\n".join(buf))
+    if buf_paras:
+        chunks.append("\n\n".join(buf_paras))
+
     return chunks
 
 
@@ -213,6 +274,8 @@ def ingest(ticker: str, form: str, text: str, source: str) -> int:
         logger.warning("No chunks produced for %s %s (%s)", ticker, form, source)
         return 0
 
+    logger.info("Embedding %d chunks for %s %s (batch=%d, delay=%.1fs)…",
+                len(chunks), ticker, form, EMBED_BATCH, EMBED_BATCH_DELAY)
     vectors = embed_texts(chunks, task_type="RETRIEVAL_DOCUMENT")
 
     store = get_store()

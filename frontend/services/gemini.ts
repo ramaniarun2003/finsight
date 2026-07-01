@@ -95,6 +95,24 @@ export async function extractCompany(ticker: string, form: '10-K' | '10-Q' = '10
   return (await res.json()) as ExtractResponse;
 }
 
+// --- Ingest status polling --------------------------------------------------
+
+export interface IngestStatus {
+  status: 'indexing' | 'indexed' | 'failed' | 'unknown';
+  chunks: number;
+  error?: string;
+}
+
+export async function getIngestStatus(ticker: string, form: string): Promise<IngestStatus> {
+  const res = await fetch(
+    `${API_BASE}/ingest-status/${encodeURIComponent(ticker)}?form=${encodeURIComponent(form)}`,
+  );
+  if (!res.ok) throw new Error(`Ingest status check failed (${res.status})`);
+  return (await res.json()) as IngestStatus;
+}
+
+// --- Market data ------------------------------------------------------------
+
 export interface MarketSnapshot {
   price?: number;
   market_cap?: number;
