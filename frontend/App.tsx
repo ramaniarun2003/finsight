@@ -5,7 +5,7 @@ import {
   PanelLeftClose, PanelLeftOpen,
   HelpCircle, X,
 } from 'lucide-react';
-import { ViewState, Document } from './types';
+import { ViewState, Document, IndexStatus } from './types';
 import { c, font } from './theme';
 import HelpView from './components/HelpView';
 import Dashboard from './components/Dashboard';
@@ -14,7 +14,7 @@ import ChatInterface from './components/ChatInterface';
 import AnalysisView from './components/AnalysisView';
 import SplashScreen from './components/SplashScreen';
 import GettingStarted from './components/GettingStarted';
-import { extractCompany, buildContent } from './services/gemini';
+import { extractCompany, buildContent, getIngestStatus } from './services/gemini';
 
 const NAV_ITEMS: { view: ViewState; label: string; icon: React.ReactNode }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
@@ -42,8 +42,6 @@ const App: React.FC = () => {
   const [collapsed, setCollapsed]           = useState(false);
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
-  // Adding a document selects it, so the dashboard follows whatever was just
-  // added (via getting-started, the Documents fetch, or an upload).
   const [hoveredCompany, setHoveredCompany] = useState<string | null>(null);
 
   const handleAddDocument = (doc: Document) => {
@@ -52,6 +50,41 @@ const App: React.FC = () => {
   };
   const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id));
   const handleRemoveCompany = (key: string) => setDocuments(prev => prev.filter(d => companyKey(d) !== key));
+
+  // Poll for ingest completion on any document currently in the 'indexing' state.
+  // When the backend reports indexed/failed, update the document in place.
+  React.useEffect(() => {
+    const indexing = documents.filter(
+      d => d.indexStatus === 'indexing' && d.ticker && d.form,
+    );
+    if (indexing.length === 0) return;
+
+    const timer = setInterval(async () => {
+      for (const doc of indexing) {
+        try {
+          const status = await getIngestStatus(doc.ticker!, doc.form!);
+          if (status.status !== 'indexing') {
+            setDocuments(prev =>
+              prev.map(d =>
+                d.id === doc.id
+                  ? {
+                      ...d,
+                      indexStatus: status.status as IndexStatus,
+                      indexChunks: status.chunks,
+                      indexError:  status.error ?? undefined,
+                    }
+                  : d,
+              ),
+            );
+          }
+        } catch {
+          // Transient network error — keep polling, don't surface it.
+        }
+      }
+    }, 2500);
+
+    return () => clearInterval(timer);
+  }, [documents]);
 
   // Backfill content for docs that were added before the section-extraction fix.
   // Only targets docs that came from /extract (have ticker + metrics) but have no
@@ -71,7 +104,13 @@ const App: React.FC = () => {
         setDocuments(prev =>
           prev.map(d =>
             d.id === doc.id
-              ? { ...d, content, ...(data.sector && !d.sector ? { sector: data.sector } : {}) }
+              ? {
+                  ...d,
+                  content,
+                  form: d.form ?? data.form,
+                  indexStatus: 'indexing' as IndexStatus,
+                  ...(data.sector && !d.sector ? { sector: data.sector } : {}),
+                }
               : d,
           ),
         );
@@ -102,10 +141,10 @@ const App: React.FC = () => {
 
   // Entry point for the getting-started search:
   // 1. Add an optimistic placeholder so the dashboard appears immediately.
-  // 2. Call /extract, which runs the EDGAR + companyfacts pipeline.
-  // 3. Replace the placeholder with the real metrics-filled document.
-  // While step 2 is in flight, doc.metrics is undefined, so the dashboard shows
-  // its "fundamentals will appear once fetched" state — that's the loading state.
+  // 2. Call /extract, which runs the EDGAR + companyfacts pipeline and kicks
+  //    off background ingest into RavenDB.
+  // 3. Replace the placeholder with the real metrics-filled document and set
+  //    indexStatus: 'indexing' so the polling effect starts watching it.
   const handleAddCompany = async (query: string) => {
     const ticker = query.trim().toUpperCase();
     if (!ticker) return;
@@ -132,14 +171,13 @@ const App: React.FC = () => {
                 form: data.form,
                 metrics: data.metrics,
                 content: buildContent(data.sections ?? {}),
+                indexStatus: 'indexing' as IndexStatus,
                 ...(data.sector ? { sector: data.sector } : {}),
               }
             : d,
         ),
       );
     } catch (err) {
-      // Leave the placeholder in place; the dashboard keeps showing the
-      // "awaiting data" state. Surface the failure for now via the console.
       console.error(`Failed to extract ${ticker}:`, err);
     }
   };
@@ -148,9 +186,6 @@ const App: React.FC = () => {
     return <SplashScreen onGetStarted={() => setShowSplash(false)} />;
   }
 
-  // First-run / empty workspace: no companies loaded yet. Full-screen gate,
-  // same pattern as the splash — the app chrome (sidebar nav, company list) has
-  // nothing to show until at least one filing exists.
   if (documents.length === 0) {
     return <GettingStarted onAddCompany={handleAddCompany} />;
   }

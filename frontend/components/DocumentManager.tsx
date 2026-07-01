@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { UploadCloud, FileText, Trash2, CheckCircle, Loader2, AlertTriangle } from 'lucide-react';
-import { Document } from '../types';
+import { UploadCloud, FileText, Trash2, Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Document, IndexStatus } from '../types';
 import { c, font } from '../theme';
 import { extractCompany, buildContent, searchCompanies, SearchResult } from '../services/gemini';
 import CompanyLogo from './CompanyLogo';
@@ -25,23 +25,20 @@ const selectStyle: React.CSSProperties = {
 };
 
 const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocument, onRemoveDocument, onFetched }) => {
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading]   = useState(false);
-  const [fetching, setFetching]     = useState(false);
-  const [form, setForm]             = useState<Form>('10-K');
-  const [error, setError]           = useState<string | null>(null);
+  const [fetching, setFetching]   = useState(false);
+  const [form, setForm]           = useState<Form>('10-K');
+  const [error, setError]         = useState<string | null>(null);
 
   // Ticker input: inputValue is what the user sees; resolvedTicker is the
   // confirmed ticker from a dropdown selection. Manual edits clear resolvedTicker
   // so the debounced search re-runs on the new text.
-  const [inputValue, setInputValue]       = useState('');
+  const [inputValue, setInputValue]         = useState('');
   const [resolvedTicker, setResolvedTicker] = useState<string | null>(null);
-  const [suggestions, setSuggestions]     = useState<SearchResult[]>([]);
-  const [showDrop, setShowDrop]           = useState(false);
-  const [highlightIdx, setHighlightIdx]   = useState(-1);
+  const [suggestions, setSuggestions]       = useState<SearchResult[]>([]);
+  const [showDrop, setShowDrop]             = useState(false);
+  const [highlightIdx, setHighlightIdx]     = useState(-1);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const busy = uploading || fetching;
 
   // Debounced search — skipped when a company has already been resolved from
   // the dropdown (resolvedTicker is set). Clears on manual typing via onChange.
@@ -61,8 +58,8 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
   }, [inputValue, resolvedTicker]);
 
   const selectSuggestion = (s: SearchResult) => {
-    setInputValue(s.name);      // show the full company name in the input
-    setResolvedTicker(s.ticker); // store the ticker for the actual fetch
+    setInputValue(s.name);
+    setResolvedTicker(s.ticker);
     setShowDrop(false);
     setHighlightIdx(-1);
   };
@@ -89,35 +86,9 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     }
   };
 
-  const simulateUpload = (file: File) => {
-    setUploading(true);
-    setTimeout(() => {
-      onAddDocument({
-        id: `doc-${Date.now()}`,
-        name: file.name,
-        uploadDate: new Date().toISOString().split('T')[0],
-        size: `${(file.size / (1024 * 1024)).toFixed(2)} MB`,
-        content: `Simulated extracted content for ${file.name}. (In a real app this would be parsed PDF text.)`,
-      });
-      setUploading(false);
-    }, 1500);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(false);
-    if (e.dataTransfer.files?.[0]) simulateUpload(e.dataTransfer.files[0]);
-  };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) simulateUpload(e.target.files[0]);
-  };
-
   const handleFetchEdgar = async () => {
-    // Prefer the resolved ticker from the dropdown; fall back to raw input for
-    // users who type an exact ticker without selecting a suggestion.
     const t = (resolvedTicker || inputValue.trim()).toUpperCase();
-    if (!t || busy) return;
+    if (!t || fetching) return;
     setError(null);
     setFetching(true);
     try {
@@ -131,6 +102,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         ticker: t,
         form: data.form,
         metrics: data.metrics,
+        indexStatus: 'indexing',
         ...(data.sector ? { sector: data.sector } : {}),
       });
       setInputValue('');
@@ -143,7 +115,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     }
   };
 
-  const canFetch = inputValue.trim() && !busy;
+  const canFetch = inputValue.trim() && !fetching;
 
   return (
     <div style={{ padding: 22, height: '100%', overflowY: 'auto', fontFamily: FF, background: c.bg }}>
@@ -152,7 +124,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
       <div style={{ marginBottom: 20 }}>
         <p style={{ fontSize: 15, fontWeight: 500, color: c.text, margin: '0 0 2px' }}>Document library</p>
         <p style={{ fontSize: 13, color: c.textMuted, margin: 0 }}>
-          Fetch filings from SEC EDGAR or upload your own. Each is parsed, embedded, and made queryable.
+          Fetch filings from SEC EDGAR — each is parsed and embedded into a searchable vector index for RAG chat.
         </p>
       </div>
 
@@ -170,7 +142,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
               value={inputValue}
               onChange={e => {
                 setInputValue(e.target.value);
-                setResolvedTicker(null); // manual edit invalidates any prior selection
+                setResolvedTicker(null);
                 if (error) setError(null);
               }}
               onKeyDown={handleTickerKeyDown}
@@ -239,7 +211,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
           </p>
         )}
 
-        {/* Fetch error (honey warn tokens — never red, which is reserved for financials) */}
+        {/* Fetch error — honey warn tokens */}
         {error && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: 8,
@@ -260,36 +232,21 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         <div style={{ flex: 1, height: '0.5px', background: c.border }} />
       </div>
 
-      {/* Secondary: upload */}
+      {/* PDF upload — disabled, coming soon */}
       <div
-        onClick={() => !busy && fileInputRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
-        onDrop={handleDrop}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          border: `1px dashed ${isDragging ? c.brand : c.border}`,
+          border: `1px dashed ${c.border}`,
           borderRadius: 8, padding: '12px 16px', marginBottom: 24,
-          cursor: busy ? 'default' : 'pointer',
-          background: isDragging ? c.brandTint : 'transparent',
-          color: c.textMuted, fontSize: 13,
-          transition: 'border-color 0.15s, background 0.15s',
+          cursor: 'default',
+          background: 'transparent',
+          color: c.textFaint, fontSize: 13,
+          opacity: 0.6,
         }}
-        onMouseEnter={e => { if (!busy && !isDragging) (e.currentTarget as HTMLDivElement).style.background = c.surface; }}
-        onMouseLeave={e => { if (!isDragging) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
       >
-        <input type="file" ref={fileInputRef} onChange={handleFileInput} style={{ display: 'none' }} accept=".pdf,.txt,.csv" />
-        {uploading ? (
-          <>
-            <Loader2 size={16} color={c.brand} style={{ animation: 'spin 1s linear infinite' }} />
-            Processing and generating embeddings…
-          </>
-        ) : (
-          <>
-            <UploadCloud size={18} color={c.textMuted} />
-            Click to upload or drag and drop · PDF, TXT, CSV · max 10MB
-          </>
-        )}
+        <input type="file" ref={fileInputRef} style={{ display: 'none' }} disabled />
+        <UploadCloud size={18} color={c.textFaint} />
+        PDF / TXT upload — coming soon
       </div>
 
       {/* Document list */}
@@ -304,7 +261,7 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
         {documents.length === 0 ? (
           <div style={{ padding: '32px 20px', textAlign: 'center' }}>
             <FileText size={22} color={c.textFaint} style={{ margin: '0 auto 8px', display: 'block' }} />
-            <p style={{ fontSize: 13, color: c.textFaint, margin: 0 }}>No filings yet. Fetch from EDGAR or upload a file above.</p>
+            <p style={{ fontSize: 13, color: c.textFaint, margin: 0 }}>No filings yet. Fetch from EDGAR above.</p>
           </div>
         ) : (
           <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
@@ -323,6 +280,55 @@ const DocumentManager: React.FC<DocumentManagerProps> = ({ documents, onAddDocum
     </div>
   );
 };
+
+// --- Index status badge -----------------------------------------------------
+
+const IndexBadge: React.FC<{ status: IndexStatus | undefined; chunks?: number; error?: string }> = ({
+  status, chunks, error,
+}) => {
+  if (!status) return null;
+
+  if (status === 'indexing') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 11, color: c.textMuted,
+      }}>
+        <Loader2 size={11} style={{ animation: 'spin 1s linear infinite', flexShrink: 0 }} />
+        Indexing…
+      </span>
+    );
+  }
+
+  if (status === 'indexed') {
+    return (
+      <span style={{
+        display: 'inline-flex', alignItems: 'center', gap: 4,
+        fontSize: 11,
+        padding: '2px 7px', borderRadius: 10,
+        background: c.brandTint, color: c.brand,
+      }} title={chunks ? `${chunks} chunks stored` : undefined}>
+        <CheckCircle2 size={10} style={{ flexShrink: 0 }} />
+        {chunks ? `${chunks} chunks` : 'Indexed'}
+      </span>
+    );
+  }
+
+  // failed — honey warn, not red (red = financial direction only)
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      fontSize: 11,
+      padding: '2px 7px', borderRadius: 10,
+      background: c.warnSurface, color: c.warnFg,
+    }} title={error ?? 'Indexing failed'}>
+      <AlertTriangle size={10} style={{ flexShrink: 0 }} />
+      Index failed
+    </span>
+  );
+};
+
+// --- Document row -----------------------------------------------------------
 
 const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> = ({ doc, last, onRemove }) => {
   const [hovered, setHovered] = useState(false);
@@ -351,18 +357,15 @@ const DocRow: React.FC<{ doc: Document; last: boolean; onRemove: () => void }> =
       <CompanyLogo ticker={ticker} size={36} radius={7} />
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: c.text, margin: '0 0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {doc.name}
         </p>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: c.textFaint }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: c.textFaint, flexWrap: 'wrap' }}>
           <span>{doc.size}</span>
           <span>·</span>
           <span>Added {doc.uploadDate}</span>
           <span>·</span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: c.textMuted }}>
-            <CheckCircle size={11} />
-            Indexed
-          </span>
+          <IndexBadge status={doc.indexStatus} chunks={doc.indexChunks} error={doc.indexError} />
         </div>
       </div>
 

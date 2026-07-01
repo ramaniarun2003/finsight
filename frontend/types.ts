@@ -1,3 +1,5 @@
+export type IndexStatus = 'indexing' | 'indexed' | 'failed';
+
 export interface Document {
   id: string;
   name: string;
@@ -8,6 +10,9 @@ export interface Document {
   form?: string;
   sector?: string;            // GICS sector label, e.g. "Consumer Discretionary"
   metrics?: FilingMetrics;    // structured XBRL data from the extractor
+  indexStatus?: IndexStatus;  // tracks RavenDB embedding ingest progress
+  indexError?: string;        // set when indexStatus === 'failed'
+  indexChunks?: number;       // count of chunks stored on success
 }
 
 // --- Extractor output (backend/data_extract/extractor.py -> metrics) ---------
