@@ -26,7 +26,6 @@ const fmtUSD = (m?: number): string => {
   return `$${Math.round(m).toLocaleString()}M`;
 };
 
-// Raw USD (market cap, etc.).
 const fmtMoney = (n?: number): string => {
   if (n == null) return '—';
   const a = Math.abs(n);
@@ -36,7 +35,6 @@ const fmtMoney = (n?: number): string => {
   return `$${Math.round(n).toLocaleString()}`;
 };
 
-// Counts (volume).
 const fmtNum = (n?: number): string => {
   if (n == null) return '—';
   const a = Math.abs(n);
@@ -89,14 +87,13 @@ const Stat: React.FC<{ label: string; value: string }> = ({ label, value }) => (
   </div>
 );
 
+const companyKey = (d: Document) => (d.ticker || d.name).toUpperCase();
+
 // --- Component ---------------------------------------------------------------
 
 const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
-  // Active company = the selected one (by ticker/name key), else most recent.
-  // Among that company's filings, prefer the annual 10-K (fuller data) over a 10-Q.
-  const key = (d: Document) => (d.ticker || d.name).toUpperCase();
   const forTicker = selectedTicker
-    ? documents.filter(d => key(d) === selectedTicker.toUpperCase())
+    ? documents.filter(d => companyKey(d) === selectedTicker.toUpperCase())
     : documents;
   const doc = forTicker.find(d => d.form === '10-K') ?? forTicker[0] ?? documents[0];
 
@@ -146,7 +143,7 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
 
       {/* Header — real identity */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-        <CompanyLogo ticker={ticker} size={42} radius={8} />
+        <CompanyLogo ticker={ticker} website={snap?.website} size={42} radius={8} />
         <div>
           <p style={{ fontSize: 16, fontWeight: 500, color: c.text, margin: 0 }}>{name}</p>
           <p style={{ fontSize: 12, color: c.textMuted, margin: 0 }}>{meta || 'Financial research workspace'}</p>
@@ -269,7 +266,6 @@ const Dashboard: React.FC<DashboardProps> = ({ documents, selectedTicker }) => {
         )}
       </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };

@@ -43,9 +43,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
   const [input, setInput]                 = useState('');
   const [isLoading, setIsLoading]         = useState(false);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
-  const [sectionFilters, setSectionFilters] = useState({
-    mda: true, risks: true, financials: true, business: false,
-  });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef    = useRef<HTMLTextAreaElement>(null);
 
@@ -90,11 +87,11 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
         sources,
         timestamp: new Date(),
       }]);
-    } catch (error: any) {
+    } catch (err) {
       setMessages(prev => [...prev, {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        text: `Error: ${error.message || 'Failed to get a response.'}`,
+        text: `Error: ${err instanceof Error ? err.message : 'Failed to get a response.'}`,
         timestamp: new Date(),
       }]);
     } finally {
@@ -108,9 +105,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
 
   const toggleDoc = (id: string) =>
     setSelectedDocIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-
-  const toggleSection = (key: keyof typeof sectionFilters) =>
-    setSectionFilters(prev => ({ ...prev, [key]: !prev[key] }));
 
   return (
     <div style={{ display: 'flex', height: '100%', ...fs }}>
@@ -154,29 +148,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
                 ))}
               </>
             )}
-          </div>
-        </div>
-
-        {/* Sections */}
-        <div>
-          <p style={{ fontSize: 11, color: c.textFaint, textTransform: 'uppercase', letterSpacing: '0.05em', margin: '0 0 8px' }}>
-            Sections
-          </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {(Object.entries({ mda: 'MD&A', risks: 'Risk factors', financials: 'Financials', business: 'Business' }) as [keyof typeof sectionFilters, string][]).map(([key, label]) => (
-              <label
-                key={key}
-                style={{ fontSize: 12, display: 'flex', alignItems: 'center', gap: 7, color: c.text2, cursor: 'pointer' }}
-              >
-                <input
-                  type="checkbox"
-                  checked={sectionFilters[key]}
-                  onChange={() => toggleSection(key)}
-                  style={{ accentColor: c.brand, margin: 0, cursor: 'pointer' }}
-                />
-                {label}
-              </label>
-            ))}
           </div>
         </div>
 
@@ -331,7 +302,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ documents }) => {
         </div>
       </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 };
