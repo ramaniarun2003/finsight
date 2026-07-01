@@ -89,3 +89,37 @@ export async function extractCompany(ticker: string, form: '10-K' | '10-Q' = '10
   }
   return (await res.json()) as ExtractResponse;
 }
+
+// Market data: current snapshot + price history from the /market endpoint
+// (yfinance-backed). Independent of /extract; a market failure never blanks
+// the filing fundamentals.
+export interface MarketSnapshot {
+  price?: number;
+  market_cap?: number;
+  volume?: number;
+  high_52w?: number;
+  low_52w?: number;
+  pe_ratio?: number;
+  change_pct?: number;
+}
+
+export interface MarketHistoryPoint {
+  date: string;
+  close: number;
+}
+
+export interface MarketResponse {
+  ticker: string;
+  period: string;
+  snapshot: MarketSnapshot;
+  history: MarketHistoryPoint[];
+}
+
+export async function fetchMarketData(ticker: string, period = '1y'): Promise<MarketResponse> {
+  const res = await fetch(`${API_BASE}/market/${encodeURIComponent(ticker)}?period=${period}`);
+  if (!res.ok) {
+    const msg = await res.text().catch(() => res.statusText);
+    throw new Error(`Market fetch failed (${res.status}): ${msg}`);
+  }
+  return (await res.json()) as MarketResponse;
+}
