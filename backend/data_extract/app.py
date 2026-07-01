@@ -1,8 +1,9 @@
 """
 FastAPI service for FinSight (backend/data_extract/app.py).
 
-Two surfaces:
+Surfaces:
   - GET  /extract/{ticker}  -> extraction pipeline (ticker -> clean structured data)
+  - GET  /market/{ticker}   -> market snapshot + price history (yfinance)
   - POST /api/chat          -> RAG chat (RavenDB retrieval + Gemini generation)
 
 Run from the repo root:
@@ -10,6 +11,7 @@ Run from the repo root:
 Then call:
     GET  http://localhost:8000/health
     GET  http://localhost:8000/extract/AEO
+    GET  http://localhost:8000/market/AAPL
     POST http://localhost:8000/api/chat   {"question": "..."}
 """
 
@@ -33,6 +35,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .extractor import run
 from .rag import router as chat_router
+from .market import router as market_router
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +54,7 @@ app.add_middleware(
 )
 
 app.include_router(chat_router)
+app.include_router(market_router)
 
 
 @app.get("/health")
