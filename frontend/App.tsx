@@ -3,7 +3,7 @@ import {
   LayoutDashboard, Files, MessageSquare, BarChart3,
   TrendingUp, Building2, Plus, Settings,
   PanelLeftClose, PanelLeftOpen,
-  HelpCircle,
+  HelpCircle, X,
 } from 'lucide-react';
 import { ViewState, Document } from './types';
 import { c, font } from './theme';
@@ -14,7 +14,7 @@ import ChatInterface from './components/ChatInterface';
 import AnalysisView from './components/AnalysisView';
 import SplashScreen from './components/SplashScreen';
 import GettingStarted from './components/GettingStarted';
-import { extractCompany } from './services/gemini';
+import { extractCompany, buildContent } from './services/gemini';
 
 const NAV_ITEMS: { view: ViewState; label: string; icon: React.ReactNode }[] = [
   { view: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={17} /> },
@@ -33,25 +33,51 @@ const TOPBAR_SUBTITLES: Record<ViewState, string> = {
 };
 
 const FF = font.ui;
+const companyKey = (d: Document) => (d.ticker || d.name).toUpperCase();
 
 const App: React.FC = () => {
   const [showSplash, setShowSplash]         = useState(true);
   const [currentView, setCurrentView]       = useState<ViewState>('dashboard');
   const [documents, setDocuments]           = useState<Document[]>([]);
   const [collapsed, setCollapsed]           = useState(false);
-  // Which company the dashboard is showing. Keyed by ticker (or name fallback),
-  // uppercased — same key the sidebar company list uses.
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
-
-  const companyKey = (d: Document) => (d.ticker || d.name).toUpperCase();
 
   // Adding a document selects it, so the dashboard follows whatever was just
   // added (via getting-started, the Documents fetch, or an upload).
+  const [hoveredCompany, setHoveredCompany] = useState<string | null>(null);
+
   const handleAddDocument = (doc: Document) => {
     setDocuments(prev => [doc, ...prev]);
     setSelectedTicker(companyKey(doc));
   };
   const handleRemoveDocument = (id: string) => setDocuments(prev => prev.filter(d => d.id !== id));
+  const handleRemoveCompany = (key: string) => setDocuments(prev => prev.filter(d => companyKey(d) !== key));
+
+  // Backfill content for docs that were added before the section-extraction fix.
+  // Only targets docs that came from /extract (have ticker + metrics) but have no
+  // content yet. Uses a ref so a filing with no parseable sections doesn't loop.
+  const backfilledRef = React.useRef(new Set<string>());
+  React.useEffect(() => {
+    const stale = documents.filter(
+      d => d.ticker && !d.content && !backfilledRef.current.has(d.id),
+    );
+    if (stale.length === 0) return;
+    const doc = stale[0];
+    backfilledRef.current.add(doc.id);
+    extractCompany(doc.ticker!, (doc.form as '10-K' | '10-Q') ?? '10-K')
+      .then(data => {
+        const content = buildContent(data.sections ?? {});
+        if (!content) return;
+        setDocuments(prev =>
+          prev.map(d =>
+            d.id === doc.id
+              ? { ...d, content, ...(data.sector && !d.sector ? { sector: data.sector } : {}) }
+              : d,
+          ),
+        );
+      })
+      .catch(() => {});
+  }, [documents]);
 
   // Companies derived from loaded documents (deduped by ticker), so the sidebar
   // reflects what's actually ingested rather than a hardcoded list.
@@ -105,6 +131,7 @@ const App: React.FC = () => {
                 name: data.ticker || ticker,
                 form: data.form,
                 metrics: data.metrics,
+                content: buildContent(data.sections ?? {}),
                 ...(data.sector ? { sector: data.sector } : {}),
               }
             : d,
@@ -225,25 +252,47 @@ const App: React.FC = () => {
           )}
           {companies.map(({ key, label }) => {
             const active = key === selectedTicker && currentView === 'dashboard';
+            const hovered = hoveredCompany === key;
             return (
-              <button
+              <div
                 key={key}
-                onClick={() => { setSelectedTicker(key); setCurrentView('dashboard'); }}
-                title={collapsed ? label : undefined}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6,
-                  fontSize: 12, fontWeight: active ? 500 : 400,
-                  color: active ? c.brand : c.textMuted,
-                  background: active ? c.brandTint : 'transparent',
-                  border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', whiteSpace: 'nowrap', fontFamily: FF,
-                  transition: 'background 0.1s, color 0.1s',
-                }}
-                onMouseEnter={e => { if (!active) { e.currentTarget.style.background = c.hover; e.currentTarget.style.color = c.text; } }}
-                onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = c.textMuted; } }}
+                style={{ position: 'relative', display: 'flex', alignItems: 'center' }}
+                onMouseEnter={() => setHoveredCompany(key)}
+                onMouseLeave={() => setHoveredCompany(null)}
               >
-                <span style={{ flexShrink: 0, minWidth: 17, display: 'flex' }}><Building2 size={16} /></span>
-                {!collapsed && <span>{label}</span>}
-              </button>
+                <button
+                  onClick={() => { setSelectedTicker(key); setCurrentView('dashboard'); }}
+                  title={collapsed ? label : undefined}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 9, padding: '7px 10px', borderRadius: 6,
+                    fontSize: 12, fontWeight: active ? 500 : 400,
+                    color: active ? c.brand : hovered ? c.text : c.textMuted,
+                    background: active ? c.brandTint : hovered ? c.hover : 'transparent',
+                    border: 'none', cursor: 'pointer', width: '100%', textAlign: 'left', whiteSpace: 'nowrap', fontFamily: FF,
+                    transition: 'background 0.1s, color 0.1s',
+                    paddingRight: hovered && !collapsed ? 28 : 10,
+                  }}
+                >
+                  <span style={{ flexShrink: 0, minWidth: 17, display: 'flex' }}><Building2 size={16} /></span>
+                  {!collapsed && <span>{label}</span>}
+                </button>
+                {hovered && !collapsed && (
+                  <button
+                    onClick={e => { e.stopPropagation(); handleRemoveCompany(key); }}
+                    title={`Remove ${label}`}
+                    style={{
+                      position: 'absolute', right: 6,
+                      width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      borderRadius: 4, border: 'none', background: 'transparent',
+                      cursor: 'pointer', color: c.textFaint, padding: 0,
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.background = c.negSurface; e.currentTarget.style.color = c.neg; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = c.textFaint; }}
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
             );
           })}
           <button
