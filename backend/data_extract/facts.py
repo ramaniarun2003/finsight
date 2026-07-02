@@ -13,6 +13,15 @@ filer migrates an XBRL tag: the old concept's newest value is stale (an earlier 
 while every other line is current, producing impossible margins (>100%). So we first
 resolve a single target fiscal year-end from reliably-tagged concepts, then pull every
 field at that period.
+
+Stale values
+------------
+When _pick() cannot find any candidate concept at the target period it falls back to
+the concept's latest-ever value, marked stale=True. A stale value is from a prior
+fiscal year — emitting it alongside current-year figures creates impossible results
+(e.g. prior-year net income paired with current-year operating loss). We therefore
+drop stale hits entirely and leave the field absent rather than pollute the output
+with cross-year contamination.
 """
 
 from datetime import date
@@ -38,7 +47,15 @@ INCOME_CONCEPTS = {
     "total_opex_millions": ["OperatingExpenses", "CostsAndExpenses"],
     "operating_income_millions": ["OperatingIncomeLoss"],
     "income_tax_millions": ["IncomeTaxExpenseBenefit"],
-    "net_income_millions": ["NetIncomeLoss"],
+    # NetIncomeLoss is the standard tag; some filers (e.g. Ford FY2025) omit it
+    # and tag only the "available to common stockholders" variant instead.
+    # The fallback order guarantees we pick the current-year figure from whichever
+    # concept the filer actually populated, rather than a stale prior-year value.
+    "net_income_millions": [
+        "NetIncomeLoss",
+        "NetIncomeLossAvailableToCommonStockholdersBasic",
+        "NetIncomeLossAvailableToCommonStockholdersDiluted",
+    ],
 }
 
 INCOME_PER_SHARE = {  # unit "USD/shares"; never scaled to millions
@@ -172,14 +189,15 @@ def _pick(facts, concepts, unit="USD", target_end=None):
     Resolution order, per the candidate list:
       1. exact match on the target fiscal year-end,
       2. a year-end within tolerance of the target (handles minor tagging drift),
-      3. fallback to the concept's latest available value (flagged ``stale``),
-         so a filer with an unusual period still yields *something*.
+      3. fallback to the concept's latest available value (flagged ``stale``).
+
+    Callers that require a current-year value should reject stale hits.
     """
     rows_by_concept = [(c, _annual_rows(facts, "us-gaap", c, unit)) for c in concepts]
 
     if target_end:
         t = _parse(target_end)
-        # 1) exact period match
+        # 1) exact period match — check all candidates before giving up
         for concept, rows in rows_by_concept:
             exact = [r for r in rows if r["end"] == target_end]
             if exact:
@@ -215,17 +233,20 @@ def extract_income_statement(facts: dict) -> dict:
 
     for field, concepts in INCOME_CONCEPTS.items():
         hit = _pick(facts, concepts, "USD", target)
-        if hit:
+        # Reject stale hits: a value from a prior fiscal year mixed with current-year
+        # figures produces impossible results (e.g. prior-year net income against a
+        # current-year operating loss). Leave the field absent instead.
+        if hit and not hit.get("stale"):
             out[field] = _millions(hit["value"])
 
     for field, concepts in INCOME_PER_SHARE.items():
         hit = _pick(facts, concepts, "USD/shares", target)
-        if hit:
+        if hit and not hit.get("stale"):
             out[field] = hit["value"]
 
     for field, concepts in INCOME_RATES.items():
         hit = _pick(facts, concepts, "pure", target)
-        if hit:
+        if hit and not hit.get("stale"):
             out[field] = round(hit["value"] * 100, 2)
 
     rev = out.get("total_revenue_millions")
@@ -250,7 +271,7 @@ def extract_balance_sheet(facts: dict) -> dict:
 
     for field, concepts in BALANCE_CONCEPTS.items():
         hit = _pick(facts, concepts, "USD", target)
-        if hit:
+        if hit and not hit.get("stale"):
             out[field] = _millions(hit["value"])
 
     if out.get("total_current_assets_millions") and out.get("total_current_liabilities"):
@@ -267,7 +288,7 @@ def extract_cash_flow(facts: dict) -> dict:
 
     for field, concepts in CASHFLOW_CONCEPTS.items():
         hit = _pick(facts, concepts, "USD", target)
-        if hit:
+        if hit and not hit.get("stale"):
             out[field] = _millions(hit["value"])
 
     if out.get("operating_cash_flow_millions") and out.get("capex_millions"):
