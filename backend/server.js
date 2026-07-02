@@ -10,6 +10,7 @@ import { GoogleAuth } from 'google-auth-library';
 import fetch from 'node-fetch';
 import rateLimit from 'express-rate-limit';
 import { WebSocketServer, WebSocket } from 'ws';
+import { askGemini } from "./services/gemini.js";
 
 const app = express();
 app.use(express.json({limit: process?.env?.API_PAYLOAD_MAX_SIZE || "7mb"}));
@@ -181,6 +182,30 @@ function getRequestHeaders(accessToken) {
     'Content-Type': 'application/json',
   };
 }
+
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { question, context } = req.body;
+
+    if (!question || !context) {
+      return res.status(400).json({
+        error: "question and context are required",
+      });
+    }
+
+    const answer = await askGemini(question, context);
+
+    res.json({
+      answer,
+    });
+  } catch (error) {
+    console.error("Gemini Error:", error);
+
+    res.status(500).json({
+      error: "Failed to generate response.",
+    });
+  }
+});
 
 // --- Proxy Endpoint ---
 app.post('/api-proxy', async (req, res) => {
